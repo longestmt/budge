@@ -1,0 +1,240 @@
+.TH BUDGE 1 "June 2026" "budge 1.0.0" "User Commands"
+.SH NAME
+budge \- self-hosted household budgeting glue around hledger, SimpleFIN, and Paisa
+.SH SYNOPSIS
+.B budge
+.RI [ \-\-dry\-run ]
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+.B budge
+automates a plain-text accounting stack: it pulls bank transactions daily
+through SimpleFIN, imports them with stock hledger CSV rules, asks an AI to
+suggest categories for whatever the rules miss, holds those suggestions in a
+reviewable pending state that still counts against the budget, and provides a
+fast vendor-grouped weekly review.
+All data lives as ordinary hledger journal files in a git repository.
+.PP
+.B budge
+is orchestration only.
+It deliberately wraps none of hledger's own functionality \(em there is no
+.B budge balance
+and no
+.BR "budge report" .
+Reporting, queries, and validation are plain hledger commands run against the
+journal, for example:
+.PP
+.nf
+    hledger \-f main.journal balance \-\-budget \-M expenses
+    hledger \-f main.journal register assets:transfers
+    hledger \-f main.journal check
+.fi
+.PP
+A transaction's category is decided at import but only trusted at promote:
+rule-matched transactions enter the books cleared
+.RB ( * ),
+AI-suggested ones wait in
+.I pending.journal
+with status
+.B !
+until the operator reviews and promotes them.
+Every correction made during review becomes a permanent rule, so the AI's
+share of the work shrinks over time.
+.SH COMMANDS
+.TP
+.B setup
+Interactive, idempotent bootstrap.
+Verifies prerequisites, exchanges the one-time SimpleFIN setup token for a
+permanent access URL (stored only in
+.IR secrets.env ),
+maps bank accounts to hledger account names, scaffolds the data repository,
+seeds transfer/payment rules, backfills 90 days of history with computed
+opening balances and balance assertions, installs the systemd timers, writes
+the Paisa dashboard configuration, and hands off to the budget wizard.
+Safe to re-run at any point; existing values are kept when you press Enter.
+.TP
+.B fetch \fR[\fB\-\-backfill\fR \fIDAYS\fR]
+Pull new transactions from SimpleFIN, append them to the immutable raw CSVs
+under
+.IR import/raw/ ,
+import rule matches into
+.I main.journal
+as cleared, queue the rest in
+.IR pending.journal ,
+append a balance assertion per account, and commit.
+Duplicates are impossible: every transaction ID is recorded in
+.I import/state/
+and checked against the journals.
+With
+.B \-\-backfill
+also writes opening balance entries against
+.IR equity:opening-balances .
+.TP
+.B categorize
+Send uncategorized pending transactions to the configured AI provider and
+write its suggestions (category, confidence, one-line rationale) into
+.IR pending.journal .
+The request contains only payee/description, amount, date, and source account
+name \(em never account numbers, balances, or history.
+Every decision is appended to
+.I ai/ai-decisions.log
+before it is used.
+Malformed model output is rejected; the transaction stays
+.I expenses:uncategorized
+rather than guessed at.
+The categorizer's entire write surface is pending.journal and the log.
+.TP
+.B review \fR[\fB\-\-edit\fR]
+Weekly vendor-grouped review of pending transactions, largest groups first.
+Per group: approve, correct the vendor (writes a rule, then regenerates
+pending so every matching transaction updates at once and the vendor never
+returns), or correct a single transaction (one-off, no rule).
+.B \-\-edit
+opens
+.I pending.journal
+in
+.BR $EDITOR .
+Ends by offering promote.
+.TP
+.B promote
+The explicit final step:
+.B hledger check
+is a hard gate (any failure stops everything with nothing written, committed,
+or pushed), then pending entries are flipped to cleared, appended to
+.IR main.journal ,
+pending is truncated, review outcomes are appended to the decision log, and
+one commit captures journal and rules changes together, followed by a push.
+.TP
+.B plan \fR[\fB\-\-bootstrap\fR|\fB\-\-reassess\fR] [\fB\-\-months\fR \fIN\fR]
+Budget planning wizard.
+Asks exactly three questions (monthly take-home, savings target, and what
+you're saving for / what's changing) and stores them in
+.IR household.md .
+Bootstrap mode analyzes your real imported spending and proposes three
+confirmable artifacts: a chart of accounts, monthly envelope amounts
+constrained by income minus savings, and 20\(en30 starter merchant rules.
+Re-assessment mode reports variance per category with streaks and dormancy
+over the trailing
+.I N
+months (default 3) and proposes a budget diff for approval.
+Nothing is written without explicit confirmation, and the wizard cites only
+your own numbers \(em no external benchmarks.
+.TP
+.B regenerate
+Rebuild
+.I pending.journal
+from the raw CSVs, the current rules, and the decision log.
+Pending is a derived artifact; this is always safe.
+Entries that now match a rule move to
+.I main.journal
+as cleared; operator one-off corrections are preserved.
+.TP
+.B push
+Push the data repository to its git remote.
+.TP
+.B notify \fR[\fB\-\-unit\fR \fIUNIT\fR] [\fB\-\-review\-nudge\fR]
+Outbound notifications (used by the systemd units).
+.B \-\-unit
+sends the failed unit's name, exit status, and last ~20 journal lines to the
+configured webhook;
+.B \-\-review\-nudge
+sends \(lqreview ready \(em N transactions pending\(rq.
+This path only sends data out; nothing can write back through it.
+.SH OPTIONS
+.TP
+.B \-\-dry\-run
+Print every intended action and write nothing: no files, no commits, no
+pushes, no AI calls.
+Accepted by every command.
+.SH FILES
+.TP
+.I ~/.config/budge/budge.conf
+Machine-local settings (INI): data repo path, AI provider/endpoint/model,
+sync schedules, notification webhook, review day.
+.TP
+.I ~/.config/budge/secrets.env
+Secrets, mode 600, outside the data repo:
+.B SIMPLEFIN_ACCESS_URL
+and
+.BR AI_API_KEY .
+.TP
+.I <repo>/main.journal
+The source of truth.
+Includes
+.IR accounts.journal ,
+.IR budget.journal ,
+and
+.IR pending.journal .
+.TP
+.I <repo>/import/rules/*.rules
+Stock hledger CSV rules, one file per bank account.
+Vendor rules accumulate here; transfer/payment patterns stay last so they
+take precedence.
+.TP
+.I <repo>/import/raw/YYYY-MM/*.csv
+Immutable record of what SimpleFIN returned, committed to git.
+.TP
+.I <repo>/ai/agent.md
+The categorizer's instructions.
+Operator-editable; the live category list and recent approved examples are
+substituted in at run time.
+.TP
+.I <repo>/ai/ai-decisions.log
+Append-only JSON-lines audit log of every AI suggestion, rejection, manual
+override, and review outcome.
+.SH ENVIRONMENT
+.TP
+.B BUDGE_CONFIG_DIR
+Alternate configuration directory (default
+.IR ~/.config/budge ).
+.TP
+.B BUDGE_REPO
+Alternate data repository path, overriding budge.conf.
+.TP
+.B BUDGE_HLEDGER
+Alternate hledger binary.
+.TP
+.B EDITOR
+Used by
+.B budge review \-\-edit
+and the wizard's edit steps.
+.SH EXIT STATUS
+0 on success, non-zero on any failure.
+Failures in timer-driven runs trigger the systemd
+.B OnFailure
+notification path.
+.SH EXAMPLES
+First-time setup, then a manual pull and review:
+.PP
+.nf
+    sudo ./setup.sh
+    budge fetch
+    budge review
+.fi
+.PP
+See what a fetch would do without touching anything:
+.PP
+.nf
+    budge \-\-dry\-run fetch
+.fi
+.PP
+Re-assess the budget over the last six months:
+.PP
+.nf
+    budge plan \-\-reassess \-\-months 6
+.fi
+.SH SEE ALSO
+.BR hledger (1),
+.BR systemd.timer (5),
+.BR git (1)
+.PP
+SimpleFIN protocol:
+.UR https://www.simplefin.org/protocol.html
+.UE .
+Paisa dashboard:
+.UR https://paisa.fyi
+.UE .
+.SH NOTES
+The data repository contains your complete financial history in plain text.
+Keep its git remote
+.BR private .

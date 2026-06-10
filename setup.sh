@@ -23,6 +23,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 sudo -u "$REAL_USER" pipx install --force "$SCRIPT_DIR" >/dev/null
 sudo -u "$REAL_USER" pipx ensurepath >/dev/null || true
 
+say "installing the budge man page"
+install -D -m 0644 "$SCRIPT_DIR/budge.1" /usr/local/share/man/man1/budge.1
+command -v mandb >/dev/null && mandb -q || true
+
 say "prerequisites done — starting interactive setup as ${REAL_USER}"
 # The interactive phase is idempotent and never needs root except for the
 # systemd install step, which prints exact sudo commands if it can't write.

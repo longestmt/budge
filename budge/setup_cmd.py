@@ -46,6 +46,23 @@ def _check_prereqs(cfg) -> None:
              "step will print instructions instead of installing")
 
 
+def _prompt_keep(question: str, current: str, fallback: str = "") -> str:
+    """Prompt that tells the user a value already exists and Enter keeps it."""
+    if current:
+        return prompt(f"{question} (already set — press Enter to keep)",
+                      current)
+    return prompt(question, fallback)
+
+
+def _mark_current(options: list, current_value) -> list:
+    """Append a '← current' marker to the option matching the stored value."""
+    return [
+        (v, label + ("   ← current (Enter keeps it)" if v == current_value
+                     else ""))
+        for v, label in options
+    ]
+
+
 def _collect_ai(cfg, ini) -> str:
     """Provider, key, and model selection. Returns the API key (in memory
     only — it is written to secrets.env, never to budge.conf)."""
@@ -53,13 +70,25 @@ def _collect_ai(cfg, ini) -> str:
 
     say("\n— AI provider (categorizes transactions you haven't made a "
         "rule for) —")
-    pick = choose("Which AI provider do you want to use?", [
+    presets = {
+        "https://ollama.com/v1": "ollama-cloud",
+        "https://api.openai.com/v1": "openai",
+        "https://api.anthropic.com": "anthropic",
+    }
+    stored_base = ini.get("ai", "base_url", fallback="")
+    current_pick = presets.get(
+        stored_base, "local" if stored_base else None)
+    options = _mark_current([
         ("ollama-cloud", "Ollama cloud"),
         ("openai", "OpenAI"),
         ("anthropic", "Anthropic (Claude)"),
         ("local", "Local Ollama or another self-hosted "
                   "OpenAI-compatible server"),
-    ])
+    ], current_pick)
+    default = next((i for i, (v, _) in enumerate(options)
+                    if v == current_pick), 0)
+    pick = choose("Which AI provider do you want to use?", options,
+                  default=default)
     if pick == "ollama-cloud":
         provider, base_url = "openai-compatible", "https://ollama.com/v1"
     elif pick == "openai":
@@ -68,10 +97,11 @@ def _collect_ai(cfg, ini) -> str:
         provider, base_url = "anthropic", "https://api.anthropic.com"
     else:
         provider = "openai-compatible"
-        base_url = prompt(
+        base_url = _prompt_keep(
             "server URL (for local Ollama this is usually "
             "http://localhost:11434/v1)",
-            ini.get("ai", "base_url", fallback="http://localhost:11434/v1"))
+            stored_base if current_pick == "local" else "",
+            "http://localhost:11434/v1")
     ini.set("ai", "provider", provider)
     ini.set("ai", "base_url", base_url)
 
@@ -92,7 +122,7 @@ def _collect_ai(cfg, ini) -> str:
         warn(f"could not fetch the model list ({e}) — falling back to "
              "typing a name")
     if models:
-        options = [(m, m) for m in models[:30]]
+        options = _mark_current([(m, m) for m in models[:30]], current)
         options.append(("__other__", "other (type a model name)"))
         default = next((i for i, (v, _) in enumerate(options)
                         if v == current), 0)
@@ -101,22 +131,29 @@ def _collect_ai(cfg, ini) -> str:
         if model == "__other__":
             model = prompt("model name", current)
     else:
-        model = prompt("AI model name", current)
+        model = _prompt_keep("AI model name", current)
     ini.set("ai", "model", model)
     return key
 
 
 def _collect_schedule(ini) -> None:
     say("\n— sync frequency —")
+    stored = ini.get("schedule", "fetch", fallback="")
+    by_fetch = {"*-*-* 06:00:00": "daily", "*-*-* 00/4:00:00": "4h",
+                "*-*-* *:00:00": "1h"}
+    current = by_fetch.get(stored, "custom" if stored else None)
+    options = _mark_current([
+        ("daily", "Once a day, early morning (banks usually post "
+                  "transactions overnight)"),
+        ("4h", "Every 4 hours"),
+        ("1h", "Every hour"),
+        ("custom", "Custom (raw systemd OnCalendar expressions — "
+                   "expert mode)"),
+    ], current)
+    default = next((i for i, (v, _) in enumerate(options) if v == current), 0)
     freq = choose(
-        "How often should budge pull new transactions from your bank?", [
-            ("daily", "Once a day, early morning (banks usually post "
-                      "transactions overnight)"),
-            ("4h", "Every 4 hours"),
-            ("1h", "Every hour"),
-            ("custom", "Custom (raw systemd OnCalendar expressions — "
-                       "expert mode)"),
-        ])
+        "How often should budge pull new transactions from your bank?",
+        options, default=default)
     presets = {
         "daily": ("*-*-* 06:00:00", "*-*-* 06:20:00", "*-*-* 06:40:00",
                   "6:00 am"),
@@ -156,9 +193,9 @@ def _collect_config(cfg):
         if not ini.has_section(section):
             ini.add_section(section)
 
-    repo = prompt("where should your books live? (a new private git repo "
-                  "is created here)",
-                  ini.get("repo", "path", fallback="~/budge"))
+    repo = _prompt_keep("where should your books live? (a new private git "
+                        "repo is created here)",
+                        ini.get("repo", "path", fallback=""), "~/budge")
     ini.set("repo", "path", repo)
 
     ai_key = _collect_ai(cfg, ini)
@@ -170,13 +207,15 @@ def _collect_config(cfg):
         "topic, a Slack/Discord webhook, ...). Paste that webhook URL, or\n"
         "leave blank to skip; you can add it any time under [notify] in\n"
         f"{conf_path()}.")
+    stored_url = ini.get("notify", "openclaw_url", fallback="")
     ini.set("notify", "openclaw_url",
-            prompt("notification webhook URL (blank to skip)",
-                   ini.get("notify", "openclaw_url", fallback="")))
-    days = [("Mon", "Monday"), ("Tue", "Tuesday"), ("Wed", "Wednesday"),
-            ("Thu", "Thursday"), ("Fri", "Friday"), ("Sat", "Saturday"),
-            ("Sun", "Sunday")]
+            _prompt_keep("notification webhook URL (blank to skip)",
+                         stored_url))
     current_day = ini.get("notify", "review_day", fallback="Sat")
+    days = _mark_current(
+        [("Mon", "Monday"), ("Tue", "Tuesday"), ("Wed", "Wednesday"),
+         ("Thu", "Thursday"), ("Fri", "Friday"), ("Sat", "Saturday"),
+         ("Sun", "Sunday")], current_day)
     default = next((i for i, (v, _) in enumerate(days)
                     if v == current_day), 5)
     ini.set("notify", "review_day",
