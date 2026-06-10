@@ -134,6 +134,19 @@ def get_accounts(access_url: str, start_date: int = None) -> dict:
         raise SimpleFINError(f"SimpleFIN fetch failed: HTTP {e.code}")
     except urllib.error.URLError as e:
         raise SimpleFINError(f"SimpleFIN unreachable: {e.reason}")
-    for err in data.get("errors", []):
-        raise SimpleFINError(f"SimpleFIN reported: {err}")
+
+    # SimpleFIN's `errors` array carries informational messages too (e.g.
+    # "Requested date range exceeds limit of 90 days and was capped." on
+    # backfill). Only fail when the response is actually unusable; otherwise
+    # surface the messages and continue — the per-account balance assertions
+    # are the real integrity check.
+    messages = data.get("errors", [])
+    if messages and not data.get("accounts"):
+        raise SimpleFINError(
+            "SimpleFIN returned no accounts and reported: "
+            + "; ".join(str(m) for m in messages)
+        )
+    for msg in messages:
+        from .util import warn
+        warn(f"SimpleFIN says: {msg}")
     return data

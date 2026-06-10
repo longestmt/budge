@@ -38,6 +38,7 @@ class FakeSimpleFIN:
 
     def __init__(self):
         self.accounts = []          # list of account dicts (protocol shape)
+        self.messages = []          # entries for the protocol `errors` array
         self.claimed_tokens = set()
         outer = self
 
@@ -79,7 +80,8 @@ class FakeSimpleFIN:
                     ]
                     accounts.append(a)
                 body = json.dumps(
-                    {"errors": [], "accounts": accounts}).encode()
+                    {"errors": list(outer.messages),
+                     "accounts": accounts}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))

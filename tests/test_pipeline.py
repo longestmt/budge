@@ -135,6 +135,27 @@ def test_dry_run_writes_nothing_A12(env, simplefin_server):
     assert not list((env.repo / "import" / "raw").glob("*/*.csv"))
 
 
+def test_informational_simplefin_message_is_not_fatal(env, simplefin_server,
+                                                      capsys):
+    """SimpleFIN's 'range was capped' notice must not kill the backfill."""
+    _serve(simplefin_server)
+    simplefin_server.messages = [
+        "Requested date range exceeds limit of 90 days and was capped."]
+    run_fetch(env.cfg, backfill_days=90, interactive=False)
+    err = capsys.readouterr().err
+    assert "capped" in err                      # surfaced as a warning
+    ok, out = hledger.check(env.repo / "main.journal")
+    assert ok, out                              # and the import completed
+
+
+def test_no_accounts_plus_errors_is_fatal(env, simplefin_server):
+    simplefin_server.accounts = []
+    simplefin_server.messages = ["Connection to TestBank needs attention"]
+    from budge.simplefin import SimpleFINError
+    with pytest.raises(SimpleFINError, match="needs attention"):
+        run_fetch(env.cfg, backfill_days=90, interactive=False)
+
+
 def test_assertion_failure_is_pipeline_failure(env, simplefin_server):
     """Continuous reconciliation: a drifted reported balance fails the run.
 

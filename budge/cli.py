@@ -112,6 +112,15 @@ def main(argv=None) -> int:
     except RuntimeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    except Exception as e:
+        # budge-specific operational errors get a clean message, not a
+        # traceback; anything else is a genuine bug and should crash loudly.
+        from .ai import AIError
+        from .simplefin import SimpleFINError
+        if isinstance(e, (AIError, SimpleFINError)):
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        raise
     return 0
 
 
