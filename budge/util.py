@@ -60,6 +60,26 @@ def prompt(question: str, default: str = "") -> str:
     return answer or default
 
 
+def choose(question: str, options: list, default: int = 0):
+    """Enumerated selection. `options` is a list of (value, label) pairs.
+
+    The user answers with a number (or blank for the default); returns the
+    chosen value.
+    """
+    say(question)
+    for i, (_, label) in enumerate(options, 1):
+        marker = "  (default)" if i - 1 == default else ""
+        say(f"  {i}) {label}{marker}")
+    while True:
+        answer = prompt("enter a number", str(default + 1)).strip()
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return options[int(answer) - 1][0]
+        for value, _ in options:
+            if answer == value:
+                return value
+        say(f"please enter a number between 1 and {len(options)}")
+
+
 def confirm(question: str, default: bool = False) -> bool:
     hint = "Y/n" if default else "y/N"
     try:

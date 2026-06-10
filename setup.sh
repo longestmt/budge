@@ -13,9 +13,9 @@ fi
 
 REAL_USER="${SUDO_USER:-root}"
 
-say "installing prerequisites (hledger, git, python3, pipx, podman)"
+say "installing prerequisites (sudo, hledger, git, python3, pipx, podman)"
 apt-get update -qq
-apt-get install -y -qq hledger git python3 python3-pip pipx podman
+apt-get install -y -qq sudo hledger git python3 python3-pip pipx podman
 
 say "installing the budge CLI for ${REAL_USER}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

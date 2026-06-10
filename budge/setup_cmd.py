@@ -21,7 +21,7 @@ from .fetch import run_fetch
 from .gitutil import commit_all, git
 from .scaffold import (declare_account, load_accounts, save_accounts,
                        scaffold, seed_account_rules)
-from .util import confirm, die, dry, prompt, run, say, warn
+from .util import choose, confirm, die, dry, prompt, run, say, warn
 
 UNITS = ["budge-fetch", "budge-categorize", "budge-push",
          "budge-review-nudge", "budge-notify@"]
@@ -46,7 +46,107 @@ def _check_prereqs(cfg) -> None:
              "step will print instructions instead of installing")
 
 
-def _collect_config(cfg) -> Config:
+def _collect_ai(cfg, ini) -> str:
+    """Provider, key, and model selection. Returns the API key (in memory
+    only — it is written to secrets.env, never to budge.conf)."""
+    from . import ai as ai_mod
+
+    say("\n— AI provider (categorizes transactions you haven't made a "
+        "rule for) —")
+    pick = choose("Which AI provider do you want to use?", [
+        ("ollama-cloud", "Ollama cloud"),
+        ("openai", "OpenAI"),
+        ("anthropic", "Anthropic (Claude)"),
+        ("local", "Local Ollama or another self-hosted "
+                  "OpenAI-compatible server"),
+    ])
+    if pick == "ollama-cloud":
+        provider, base_url = "openai-compatible", "https://ollama.com/v1"
+    elif pick == "openai":
+        provider, base_url = "openai-compatible", "https://api.openai.com/v1"
+    elif pick == "anthropic":
+        provider, base_url = "anthropic", "https://api.anthropic.com"
+    else:
+        provider = "openai-compatible"
+        base_url = prompt(
+            "server URL (for local Ollama this is usually "
+            "http://localhost:11434/v1)",
+            ini.get("ai", "base_url", fallback="http://localhost:11434/v1"))
+    ini.set("ai", "provider", provider)
+    ini.set("ai", "base_url", base_url)
+
+    existing_key = cfg.ai_api_key
+    if existing_key:
+        key = prompt("API key/token (blank = keep the one already stored)") \
+            or existing_key
+    else:
+        key = prompt("API key/token for this provider (blank if none "
+                     "needed, e.g. local Ollama)")
+
+    # Enumerate the provider's models rather than asking for freehand typing.
+    current = ini.get("ai", "model", fallback="")
+    models = []
+    try:
+        models = ai_mod.list_models(provider, base_url, key)
+    except Exception as e:
+        warn(f"could not fetch the model list ({e}) — falling back to "
+             "typing a name")
+    if models:
+        options = [(m, m) for m in models[:30]]
+        options.append(("__other__", "other (type a model name)"))
+        default = next((i for i, (v, _) in enumerate(options)
+                        if v == current), 0)
+        model = choose("Which model should categorize transactions?",
+                       options, default=default)
+        if model == "__other__":
+            model = prompt("model name", current)
+    else:
+        model = prompt("AI model name", current)
+    ini.set("ai", "model", model)
+    return key
+
+
+def _collect_schedule(ini) -> None:
+    say("\n— sync frequency —")
+    freq = choose(
+        "How often should budge pull new transactions from your bank?", [
+            ("daily", "Once a day, early morning (banks usually post "
+                      "transactions overnight)"),
+            ("4h", "Every 4 hours"),
+            ("1h", "Every hour"),
+            ("custom", "Custom (raw systemd OnCalendar expressions — "
+                       "expert mode)"),
+        ])
+    presets = {
+        "daily": ("*-*-* 06:00:00", "*-*-* 06:20:00", "*-*-* 06:40:00",
+                  "6:00 am"),
+        "4h": ("*-*-* 00/4:00:00", "*-*-* 00/4:20:00", "*-*-* 00/4:40:00",
+               "midnight, 4 am, 8 am, ... (every 4 hours)"),
+        "1h": ("*-*-* *:00:00", "*-*-* *:20:00", "*-*-* *:40:00",
+               "the top of every hour"),
+    }
+    if freq == "custom":
+        fetch = prompt("when to fetch (OnCalendar)",
+                       ini.get("schedule", "fetch",
+                               fallback="*-*-* 06:00:00"))
+        cat = prompt("when to categorize (should be after fetch)",
+                     ini.get("schedule", "categorize",
+                             fallback="*-*-* 06:20:00"))
+        push = prompt("when to push (should be after both)",
+                      ini.get("schedule", "push",
+                              fallback="*-*-* 06:40:00"))
+        human = "your custom schedule"
+    else:
+        fetch, cat, push, human = presets[freq]
+    ini.set("schedule", "fetch", fetch)
+    ini.set("schedule", "categorize", cat)
+    ini.set("schedule", "push", push)
+    say(f"bank sync at {human}; AI categorization runs 20 minutes later, "
+        "git push 20 minutes after that")
+
+
+def _collect_config(cfg):
+    """Returns (Config, ai_api_key)."""
     say("\n— configuration —")
     config_dir().mkdir(parents=True, exist_ok=True)
     ini = configparser.ConfigParser()
@@ -56,48 +156,42 @@ def _collect_config(cfg) -> Config:
         if not ini.has_section(section):
             ini.add_section(section)
 
-    repo = prompt("data repo path",
+    repo = prompt("where should your books live? (a new private git repo "
+                  "is created here)",
                   ini.get("repo", "path", fallback="~/budge"))
     ini.set("repo", "path", repo)
 
-    provider = prompt("AI provider (openai-compatible | anthropic)",
-                      ini.get("ai", "provider",
-                              fallback="openai-compatible"))
-    ini.set("ai", "provider", provider)
-    default_url = ("https://ollama.com/v1" if provider == "openai-compatible"
-                   else "https://api.anthropic.com")
-    ini.set("ai", "base_url",
-            prompt("AI base URL", ini.get("ai", "base_url",
-                                          fallback=default_url)))
-    ini.set("ai", "model", prompt("AI model name",
-                                  ini.get("ai", "model", fallback="")))
+    ai_key = _collect_ai(cfg, ini)
+    _collect_schedule(ini)
 
-    ini.set("schedule", "fetch",
-            prompt("fetch schedule (systemd OnCalendar)",
-                   ini.get("schedule", "fetch", fallback="*-*-* 06:00:00")))
-    ini.set("schedule", "categorize",
-            prompt("categorize schedule",
-                   ini.get("schedule", "categorize",
-                           fallback="*-*-* 06:20:00")))
-    ini.set("schedule", "push",
-            prompt("push schedule",
-                   ini.get("schedule", "push", fallback="*-*-* 06:40:00")))
-
+    say("\n— notifications (optional) —")
+    say("budge can send failure alerts and the weekly “review ready” nudge\n"
+        "to OpenClaw — or to anything that accepts a JSON POST (an ntfy\n"
+        "topic, a Slack/Discord webhook, ...). Paste that webhook URL, or\n"
+        "leave blank to skip; you can add it any time under [notify] in\n"
+        f"{conf_path()}.")
     ini.set("notify", "openclaw_url",
-            prompt("OpenClaw notification endpoint URL (blank to set later)",
+            prompt("notification webhook URL (blank to skip)",
                    ini.get("notify", "openclaw_url", fallback="")))
+    days = [("Mon", "Monday"), ("Tue", "Tuesday"), ("Wed", "Wednesday"),
+            ("Thu", "Thursday"), ("Fri", "Friday"), ("Sat", "Saturday"),
+            ("Sun", "Sunday")]
+    current_day = ini.get("notify", "review_day", fallback="Sat")
+    default = next((i for i, (v, _) in enumerate(days)
+                    if v == current_day), 5)
     ini.set("notify", "review_day",
-            prompt("review day (for the weekly nudge)",
-                   ini.get("notify", "review_day", fallback="Sat")))
+            choose("Which day do you want to do your ~10-minute weekly "
+                   "review? (the nudge fires that morning)", days,
+                   default=default))
 
     if not dry(f"write {conf_path()}"):
         with open(conf_path(), "w", encoding="utf-8") as f:
             ini.write(f)
         say(f"wrote {conf_path()}")
-    return Config()
+    return Config(), ai_key
 
 
-def _collect_secrets(cfg) -> Config:
+def _collect_secrets(cfg, ai_key: str = "") -> Config:
     say("\n— secrets (stored OUTSIDE the repo, chmod 600) —")
     secrets = dict(cfg.secrets)
 
@@ -116,10 +210,8 @@ def _collect_secrets(cfg) -> Config:
         else:
             warn("no token given; fetch will not work until you re-run setup")
 
-    if not secrets.get("AI_API_KEY"):
-        key = prompt("AI API key (blank if none needed)")
-        if key:
-            secrets["AI_API_KEY"] = key
+    if ai_key:
+        secrets["AI_API_KEY"] = ai_key
 
     lines = ["# budge secrets — never commit this file anywhere"]
     lines += [f"{k}={v}" for k, v in secrets.items()]
@@ -152,9 +244,10 @@ def _map_accounts(cfg) -> None:
             "".join(ch if ch.isalnum() else " " for ch in name)
             .lower().split())[:30] or "account"
         slug = prompt("  short slug for files", default_slug)
-        kind = "liabilities:" if confirm(
-            "  is this a credit card / liability?", default=False) \
-            else "assets:"
+        kind = choose("  what kind of account is this?", [
+            ("assets:", "checking / savings (asset)"),
+            ("liabilities:", "credit card / line of credit (liability)"),
+        ])
         hl_account = prompt("  hledger account name", kind + slug)
         accounts.append({
             "id": sf["id"], "name": f"{org} {name}".strip(),
@@ -277,8 +370,8 @@ def _paisa(cfg) -> None:
 def run_setup(cfg) -> None:
     say("budge setup — interactive bootstrap (safe to re-run)\n")
     _check_prereqs(cfg)
-    cfg = _collect_config(cfg)
-    cfg = _collect_secrets(cfg)
+    cfg, ai_key = _collect_config(cfg)
+    cfg = _collect_secrets(cfg, ai_key)
     scaffold(cfg.repo)
     _map_accounts(cfg)
     _github_remote(cfg)

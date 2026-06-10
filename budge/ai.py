@@ -90,6 +90,28 @@ def _post_json(url: str, body: dict, headers: dict) -> dict:
         raise AIError(f"AI request failed: {e}")
 
 
+def list_models(provider: str, base_url: str, api_key: str) -> list:
+    """Query the provider for its available model names (setup convenience).
+
+    Works for anything OpenAI-compatible (Ollama cloud/local, OpenAI) via
+    GET /models, and for Anthropic via GET /v1/models.
+    """
+    if provider == "anthropic":
+        url = (base_url or "https://api.anthropic.com").rstrip("/") \
+            + "/v1/models"
+        headers = {"x-api-key": api_key or "",
+                   "anthropic-version": "2023-06-01"}
+    else:
+        url = base_url.rstrip("/") + "/models"
+        headers = {}
+        if api_key:
+            headers["authorization"] = f"Bearer {api_key}"
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    return [m.get("id") for m in data.get("data", []) if m.get("id")]
+
+
 def minimized_payload(txns: list) -> list:
     """Strip every transaction down to the contract fields — nothing else."""
     out = []

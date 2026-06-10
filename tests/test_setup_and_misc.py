@@ -59,6 +59,19 @@ def test_notifier_is_outbound_only():
                                             "URLOPEN"), needle
 
 
+def test_choose_enumerated(answers, capsys):
+    from budge.util import choose
+    options = [("a", "Option A"), ("b", "Option B"), ("c", "Option C")]
+    answers.extend(["2"])
+    assert choose("pick one", options) == "b"
+    answers.extend([""])             # blank -> default (first option)
+    assert choose("pick one", options) == "a"
+    answers.extend(["9", "3"])       # out of range -> re-prompt
+    assert choose("pick one", options) == "c"
+    out = capsys.readouterr().out
+    assert "1) Option A" in out and "3) Option C" in out
+
+
 def test_review_nudge_counts_pending(env, capsys):
     from budge.notify import notify_review_ready
     from budge import journal
