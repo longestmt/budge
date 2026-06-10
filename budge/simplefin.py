@@ -19,6 +19,12 @@ class SimpleFINError(Exception):
     pass
 
 
+# beta-bridge.simplefin.org sits behind Cloudflare, which bans Python's
+# default urllib User-Agent signature outright (Cloudflare "error code: 1010").
+# Identify honestly as a real client and the bridge accepts the request.
+USER_AGENT = "budge/1.0 (SimpleFIN client; hledger; +https://hledger.org)"
+
+
 def _fake_server() -> str:
     """Test hook: BUDGE_FAKE_SIMPLEFIN points at a local stand-in server."""
     return os.environ.get("BUDGE_FAKE_SIMPLEFIN", "")
@@ -60,7 +66,7 @@ def claim(setup_token: str) -> str:
     claim_url = decode_setup_token(setup_token)
     req = urllib.request.Request(
         claim_url, data=b"", method="POST",
-        headers={"Content-Length": "0"},
+        headers={"Content-Length": "0", "User-Agent": USER_AGENT},
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
@@ -73,6 +79,15 @@ def claim(setup_token: str) -> str:
             body = ""
         detail = f"\n  claim host: {host}\n  HTTP {e.code}" \
                  + (f"\n  server said: {body}" if body else "")
+        if "1010" in body or "cloudflare" in body.lower():
+            raise SimpleFINError(
+                "the request was blocked by Cloudflare in front of the "
+                "bridge (its bot filter), NOT by SimpleFIN — your token was "
+                "never seen and is still unclaimed. This usually means the "
+                "client signature was rejected; if it persists, your "
+                "network/IP may be flagged — try from another network."
+                + detail
+            )
         if e.code == 403:
             raise SimpleFINError(
                 "SimpleFIN refused the claim (HTTP 403). Tokens are one-time "
@@ -108,7 +123,7 @@ def get_accounts(access_url: str, start_date: int = None) -> dict:
         params["start-date"] = str(int(start_date))
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url)
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     if auth:
         token = base64.b64encode(f"{auth[0]}:{auth[1]}".encode()).decode()
         req.add_header("Authorization", f"Basic {token}")
