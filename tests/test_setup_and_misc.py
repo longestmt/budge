@@ -16,13 +16,40 @@ def test_claim_exchange(simplefin_server):
 def test_already_claimed_token_clear_error(simplefin_server):
     token = simplefin_server.setup_token("used")
     simplefin.claim(token)
-    with pytest.raises(simplefin.SimpleFINError, match="ALREADY BEEN CLAIMED"):
+    with pytest.raises(simplefin.SimpleFINError, match="already claimed"):
         simplefin.claim(token)
 
 
 def test_garbage_token_clear_error():
     with pytest.raises(simplefin.SimpleFINError):
         simplefin.claim("definitely not base64 of a url!!")
+
+
+def test_token_decode_tolerates_real_world_paste():
+    """Unpadded, URL-safe, line-wrapped, and direct-URL tokens all decode."""
+    import base64
+    url = "https://bridge.example/simplefin/claim/abc-123_XY"
+    std = base64.b64encode(url.encode()).decode()
+    assert simplefin.decode_setup_token(std) == url
+    assert simplefin.decode_setup_token(std.rstrip("=")) == url   # no padding
+    wrapped = std[:20] + "\n" + std[20:]                          # line wrap
+    assert simplefin.decode_setup_token(wrapped) == url
+    urlsafe = base64.urlsafe_b64encode(url.encode()).decode()
+    assert simplefin.decode_setup_token(urlsafe) == url
+    assert simplefin.decode_setup_token(url) == url               # direct URL
+
+
+def test_corrupted_token_not_misreported_as_claimed(simplefin_server):
+    """A truncated token must NOT produce the 'already claimed' message."""
+    token = simplefin_server.setup_token("fresh2")
+    truncated = token[: len(token) // 2]
+    try:
+        simplefin.claim(truncated)
+        raised = None
+    except simplefin.SimpleFINError as e:
+        raised = str(e)
+    assert raised is not None
+    assert "already" not in raised.lower()
 
 
 def test_scaffold_idempotent_A11(env):

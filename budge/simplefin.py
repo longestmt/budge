@@ -24,21 +24,40 @@ def _fake_server() -> str:
     return os.environ.get("BUDGE_FAKE_SIMPLEFIN", "")
 
 
+def decode_setup_token(setup_token: str) -> str:
+    """Decode a setup token into its claim URL — strictly and robustly.
+
+    Tokens are base64-encoded claim URLs, but in the wild they arrive with
+    line wraps, missing padding, or URL-safe alphabet (-/_). Python's default
+    decoder silently DISCARDS unknown characters, which can corrupt the URL
+    into a valid-looking but wrong one — so decode with validate=True and try
+    both alphabets. A pasted claim URL itself is also accepted.
+    """
+    token = "".join(setup_token.split())  # strip internal line wraps too
+    if token.startswith(("http://", "https://")):
+        return token
+    padded = token + "=" * (-len(token) % 4)
+    for decoder in (base64.b64decode, base64.urlsafe_b64decode):
+        try:
+            url = decoder(padded.encode("ascii"), validate=True) \
+                .decode("utf-8").strip()
+        except Exception:
+            continue
+        if url.startswith(("http://", "https://")):
+            return url
+    raise SimpleFINError(
+        "that does not look like a SimpleFIN setup token (it should be a "
+        "base64-encoded claim URL). Re-copy the whole token from your "
+        "SimpleFIN Bridge page and try again."
+    )
+
+
 def claim(setup_token: str) -> str:
     """Exchange a one-time setup token for the permanent access URL.
 
     The setup token itself is never persisted (PRD section 6).
     """
-    setup_token = setup_token.strip()
-    try:
-        claim_url = base64.b64decode(setup_token).decode("utf-8").strip()
-    except Exception:
-        raise SimpleFINError(
-            "that does not look like a SimpleFIN setup token "
-            "(expected base64-encoded claim URL)"
-        )
-    if not claim_url.startswith(("http://", "https://")):
-        raise SimpleFINError(f"decoded claim URL looks wrong: {claim_url!r}")
+    claim_url = decode_setup_token(setup_token)
     req = urllib.request.Request(
         claim_url, data=b"", method="POST",
         headers={"Content-Length": "0"},
@@ -47,13 +66,31 @@ def claim(setup_token: str) -> str:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.read().decode("utf-8").strip()
     except urllib.error.HTTPError as e:
-        if e.code in (403, 404):
+        host = urllib.parse.urlparse(claim_url).netloc
+        try:
+            body = e.read().decode("utf-8", "replace").strip()[:300]
+        except Exception:
+            body = ""
+        detail = f"\n  claim host: {host}\n  HTTP {e.code}" \
+                 + (f"\n  server said: {body}" if body else "")
+        if e.code == 403:
             raise SimpleFINError(
-                "SimpleFIN refused the claim — this setup token has most "
-                "likely ALREADY BEEN CLAIMED (tokens are one-time use). "
-                "Generate a new setup token at your SimpleFIN Bridge and re-run."
+                "SimpleFIN refused the claim (HTTP 403). Tokens are one-time "
+                "use, so the usual cause is that this token was already "
+                "claimed — including by an earlier failed run. Generate a "
+                "fresh setup token and re-run." + detail
             )
-        raise SimpleFINError(f"claim failed: HTTP {e.code}")
+        if e.code in (404, 405):
+            raise SimpleFINError(
+                "the claim URL was not recognized by the server — the token "
+                "may have been truncated or corrupted in copy/paste. "
+                "Re-copy the WHOLE token and try again." + detail
+            )
+        raise SimpleFINError(f"claim failed.{detail}")
+    except urllib.error.URLError as e:
+        raise SimpleFINError(
+            f"could not reach the SimpleFIN Bridge to claim: {e.reason}"
+        )
 
 
 def get_accounts(access_url: str, start_date: int = None) -> dict:
