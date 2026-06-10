@@ -1,0 +1,24 @@
+# paisa — STOCK dashboard container pointed at the journal (PRD: in scope as
+# deployment config only; no modifications to Paisa itself).
+#
+# Container route (default). For a native binary instead, install paisa from
+# https://github.com/ananthakumaran/paisa/releases and use:
+#   ExecStart=/usr/local/bin/paisa serve -c @REPO@/paisa.yaml
+[Unit]
+Description=Paisa dashboard (stock container) for the budge journal
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStartPre=-/usr/bin/podman pull docker.io/ananthakumaran/paisa:latest
+ExecStart=/usr/bin/podman run --rm --name paisa \
+    -p 7500:7500 \
+    -v @REPO@:@REPO@:rw \
+    -v @REPO@/paisa.yaml:/root/paisa.yaml:ro \
+    docker.io/ananthakumaran/paisa:latest
+ExecStop=/usr/bin/podman stop paisa
+Restart=on-failure
+SyslogIdentifier=paisa
+
+[Install]
+WantedBy=multi-user.target

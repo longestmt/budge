@@ -1,0 +1,11 @@
+[Unit]
+Description=budge: quarterly nudge that budget re-assessment is due (7.8)
+# Nudge only — the wizard runs exclusively when a human runs `budge plan`.
+
+[Timer]
+OnCalendar=quarterly
+Persistent=true
+Unit=budge-review-nudge.service
+
+[Install]
+WantedBy=timers.target

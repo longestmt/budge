@@ -1,0 +1,15 @@
+# budge-categorize — AI suggestions for unmatched transactions (PRD 7.4)
+# Write surface: pending.journal + ai-decisions.log only. Never main.journal,
+# never rules, never git.
+[Unit]
+Description=budge: AI categorization of unmatched transactions
+Wants=network-online.target
+After=network-online.target budge-fetch.service
+OnFailure=budge-notify@%n.service
+
+[Service]
+Type=oneshot
+User=@USER@
+Environment=BUDGE_CONFIG_DIR=@CONFIG_DIR@
+ExecStart=@BUDGE@ categorize
+SyslogIdentifier=budge-categorize

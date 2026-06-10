@@ -1,0 +1,11 @@
+# budge-review-nudge — weekly "review ready — N transactions pending" (7.7)
+[Unit]
+Description=budge: weekly review-ready nudge via OpenClaw
+After=budge-categorize.service
+
+[Service]
+Type=oneshot
+User=@USER@
+Environment=BUDGE_CONFIG_DIR=@CONFIG_DIR@
+ExecStart=@BUDGE@ notify --review-nudge
+SyslogIdentifier=budge-review-nudge

@@ -1,0 +1,10 @@
+[Unit]
+Description=budge: weekly nudge after the last categorize before review day
+
+[Timer]
+# Fires after the categorize run on the operator's review day morning.
+OnCalendar=@REVIEW_DAY@ *-*-* 07:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

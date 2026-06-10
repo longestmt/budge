@@ -1,0 +1,15 @@
+# budge-fetch — daily SimpleFIN pull + rules-first import (PRD 7.2)
+# Rendered by `budge setup`; @PLACEHOLDERS@ become concrete paths.
+[Unit]
+Description=budge: fetch bank transactions and import via hledger rules
+Wants=network-online.target
+After=network-online.target
+OnFailure=budge-notify@%n.service
+
+[Service]
+Type=oneshot
+User=@USER@
+Environment=BUDGE_CONFIG_DIR=@CONFIG_DIR@
+ExecStart=@BUDGE@ fetch
+# journald is the log infrastructure (PRD 7.6); no custom logging.
+SyslogIdentifier=budge-fetch

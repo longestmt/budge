@@ -1,0 +1,9 @@
+[Unit]
+Description=budge: daily push timer (after fetch + categorize)
+
+[Timer]
+OnCalendar=@SCHEDULE_PUSH@
+Persistent=true
+
+[Install]
+WantedBy=timers.target

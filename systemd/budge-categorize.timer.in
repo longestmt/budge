@@ -1,0 +1,9 @@
+[Unit]
+Description=budge: daily categorize timer (after fetch)
+
+[Timer]
+OnCalendar=@SCHEDULE_CATEGORIZE@
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "budge"
+version = "1.0.0"
+description = "Glue around a stock hledger + SimpleFIN + Paisa stack: fetch, categorize, review, plan."
+requires-python = ">=3.9"
+# Zero runtime dependencies by design: stdlib only.
+
+[project.scripts]
+budge = "budge.cli:main"
+
+[tool.setuptools]
+packages = ["budge"]

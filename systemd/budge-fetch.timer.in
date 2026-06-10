@@ -1,0 +1,10 @@
+[Unit]
+Description=budge: daily fetch timer
+
+[Timer]
+OnCalendar=@SCHEDULE_FETCH@
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

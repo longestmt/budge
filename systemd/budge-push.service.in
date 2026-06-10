@@ -1,0 +1,13 @@
+# budge-push — git push of the data repo (PRD 7.2: push is a separate timer)
+[Unit]
+Description=budge: push the journal repo to its remote
+Wants=network-online.target
+After=network-online.target budge-categorize.service
+OnFailure=budge-notify@%n.service
+
+[Service]
+Type=oneshot
+User=@USER@
+Environment=BUDGE_CONFIG_DIR=@CONFIG_DIR@
+ExecStart=@BUDGE@ push
+SyslogIdentifier=budge-push

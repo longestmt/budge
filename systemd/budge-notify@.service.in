@@ -1,0 +1,13 @@
+# budge-notify@ — OnFailure hook (PRD 7.7).
+# Instantiated as budge-notify@<failed-unit>.service; sends OpenClaw the unit
+# name, exit status, and last ~20 journalctl lines. OpenClaw is read-only
+# triage: this path only sends data OUT.
+[Unit]
+Description=budge: failure notification to OpenClaw for %i
+
+[Service]
+Type=oneshot
+User=@USER@
+Environment=BUDGE_CONFIG_DIR=@CONFIG_DIR@
+ExecStart=@BUDGE@ notify --unit %i
+SyslogIdentifier=budge-notify
