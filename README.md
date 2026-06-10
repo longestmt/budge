@@ -154,7 +154,7 @@ python3 -m pytest tests/        # needs hledger >= 1.25 on PATH
                                 # (or BUDGE_TEST_HLEDGER=/path/to/hledger)
 ```
 
-31 tests cover the PRD acceptance criteria that are exercisable off-box:
+32 tests cover the PRD acceptance criteria that are exercisable off-box:
 A2–A9, A11–A15 (A1/A10 need a real Debian LXC with systemd — see
 `systemd/*.in` and the OnFailure wiring). The suite runs a fake SimpleFIN
 server speaking the real protocol (including claim/already-claimed) and a
