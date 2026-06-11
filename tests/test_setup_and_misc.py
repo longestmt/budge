@@ -86,6 +86,37 @@ def test_notifier_is_outbound_only():
                                             "URLOPEN"), needle
 
 
+def test_choose_multi(answers):
+    from budge.util import choose_multi
+    options = [("a", "A"), ("b", "B"), ("c", "C")]
+    answers.extend(["1,3"])
+    assert choose_multi("pick", options) == {"a", "c"}
+    answers.extend([""])             # blank keeps current selection
+    assert choose_multi("pick", options, {"b"}) == {"b"}
+    answers.extend(["0"])            # none
+    assert choose_multi("pick", options, {"a", "b"}) == set()
+
+
+def test_ui_config_parsing(env):
+    from budge.config import Config
+    (env.confdir / "budge.conf").write_text(
+        (env.confdir / "budge.conf").read_text()
+        + "[ui]\nenabled = paisa, hledger-ui\n")
+    cfg = Config()
+    assert cfg.ui_enabled == {"paisa", "hledger-ui"}
+    assert Config().ui_enabled  # default (no section) includes paisa
+
+
+def test_paisa_skipped_when_not_chosen(env):
+    from budge.config import Config
+    from budge.setup_cmd import _paisa
+    (env.confdir / "budge.conf").write_text(
+        (env.confdir / "budge.conf").read_text()
+        + "[ui]\nenabled = hledger-ui\n")
+    _paisa(Config())
+    assert not (env.repo / "paisa.yaml").exists()
+
+
 def test_cheatsheet_prints_recipes_without_running_them(capsys):
     from budge.cheatsheet import run_cheatsheet
     run_cheatsheet()

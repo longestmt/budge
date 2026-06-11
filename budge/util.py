@@ -139,6 +139,31 @@ def choose(question: str, options: list, default: int = 0):
         say(f"please enter a number between 1 and {len(options)}")
 
 
+def choose_multi(question: str, options: list, selected=None) -> set:
+    """Enumerated MULTI-select. Answer with numbers ('1,3'), '0' for none,
+    or blank to keep the current selection. Returns the chosen values."""
+    import re as _re
+    selected = set(selected or [])
+    say(paint(question, "cyan", "bold"))
+    say(f"  {paint('0)', 'bold')} none")
+    for i, (value, label) in enumerate(options, 1):
+        mark = paint("[x]", "green", "bold") if value in selected \
+            else "[ ]"
+        say(f"  {paint(f'{i})', 'bold')} {mark} {label}")
+    while True:
+        answer = prompt("numbers, comma-separated (blank keeps current)",
+                        "").strip()
+        if not answer:
+            return selected
+        if answer in ("0", "none"):
+            return set()
+        parts = [p for p in _re.split(r"[,\s]+", answer) if p]
+        if all(p.isdigit() and 1 <= int(p) <= len(options) for p in parts):
+            return {options[int(p) - 1][0] for p in parts}
+        say(f"please enter numbers between 0 and {len(options)}, "
+            "comma-separated")
+
+
 def confirm(question: str, default: bool = False) -> bool:
     hint = paint("(Y/n)" if default else "(y/N)", "dim")
     try:

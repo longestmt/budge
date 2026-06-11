@@ -1,0 +1,21 @@
+# hledger-web — the official hledger web UI, served VIEW-ONLY (PRD: budge
+# never grants any UI write access to the journal; edits flow through the
+# review pipeline or the operator's editor).
+#
+# Like Paisa, this has no authentication — keep it LAN-only.
+[Unit]
+Description=hledger-web (official web UI, view-only) for the budge journal
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Environment=LC_ALL=C.UTF-8
+ExecStart=/usr/bin/hledger-web --serve --host=0.0.0.0 --port=5000 \
+    --capabilities=view -f @REPO@/main.journal
+Restart=on-failure
+SyslogIdentifier=hledger-web
+
+[Install]
+WantedBy=multi-user.target

@@ -107,6 +107,14 @@ class Config:
         }
         return self.ini.get("schedule", which, fallback=defaults[which])
 
+    # --- interactive UIs ---
+    @property
+    def ui_enabled(self) -> set:
+        """Which UIs the operator chose: paisa, hledger-web, hledger-ui,
+        hledger-textual (any combination, or none)."""
+        raw = self.ini.get("ui", "enabled", fallback="paisa")
+        return {u.strip() for u in raw.split(",") if u.strip()}
+
     # --- notifications ---
     @property
     def openclaw_url(self) -> str:

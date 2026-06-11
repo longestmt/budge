@@ -21,8 +21,19 @@ from .fetch import run_fetch
 from .gitutil import commit_all, git
 from .scaffold import (declare_account, load_accounts, save_accounts,
                        scaffold, seed_account_rules)
-from .util import (banner, choose, confirm, die, dry, header, paint,
-                   prompt, run, say, success, warn)
+from .util import (banner, choose, choose_multi, confirm, die, dry, header,
+                   paint, prompt, run, say, success, warn)
+
+UI_OPTIONS = [
+    ("paisa", "Paisa — household web dashboard on :7500 (recommended)"),
+    ("hledger-web", "hledger-web — official hledger web UI on :5000 "
+                    "(served view-only)"),
+    ("hledger-ui", "hledger-ui — official terminal UI (on demand, "
+                   "no service)"),
+    ("hledger-textual", "hledger-textual — third-party Textual TUI via "
+                        "pipx (CAN EDIT transactions; never edit "
+                        "pending.journal with it — that file is derived)"),
+]
 
 UNITS = ["budge-fetch", "budge-categorize", "budge-push",
          "budge-review-nudge", "budge-notify@"]
@@ -200,6 +211,16 @@ def _collect_config(cfg):
 
     ai_key = _collect_ai(cfg, ini)
     _collect_schedule(ini)
+
+    header("interactive UIs (any combination, or none)")
+    if not ini.has_section("ui"):
+        ini.add_section("ui")
+    current_ui = {u.strip() for u in
+                  ini.get("ui", "enabled", fallback="paisa").split(",")
+                  if u.strip()}
+    chosen = choose_multi("Which UIs do you want on this machine?",
+                          UI_OPTIONS, current_ui)
+    ini.set("ui", "enabled", ",".join(sorted(chosen)))
 
     header("notifications (optional)")
     say("budge can send failure alerts and the weekly “review ready” nudge\n"
@@ -412,8 +433,10 @@ def _install_units(cfg, rendered: Path) -> None:
     target = Path("/etc/systemd/system")
     if dry("install + enable systemd timers"):
         return
+    ui = cfg.ui_enabled
     units = list(rendered.glob("budge-*")) \
-        + list(rendered.glob("paisa.service"))
+        + list(rendered.glob("paisa.service")) \
+        + list(rendered.glob("hledger-web.service"))
     if not units:
         warn("nothing to install — no rendered units found in "
              f"{rendered} (was the render step skipped?)")
@@ -425,29 +448,71 @@ def _install_units(cfg, rendered: Path) -> None:
         for timer in ["budge-fetch.timer", "budge-categorize.timer",
                       "budge-push.timer", "budge-review-nudge.timer"]:
             run(["systemctl", "enable", "--now", timer], check=False)
-        if shutil.which("podman") or shutil.which("docker"):
-            run(["systemctl", "reset-failed", "paisa.service"], check=False)
-            run(["systemctl", "enable", "--now", "paisa.service"],
-                check=False)
-            run(["systemctl", "restart", "paisa.service"], check=False)
-            say("systemd timers + paisa dashboard installed and enabled")
-        else:
-            say("systemd timers installed; paisa.service installed but not "
-                "started (no container runtime found)")
+        say("systemd timers installed and enabled")
+        _toggle_service(
+            "paisa.service", "paisa" in ui
+            and bool(shutil.which("podman") or shutil.which("docker")))
+        _toggle_service(
+            "hledger-web.service", "hledger-web" in ui
+            and bool(shutil.which("hledger-web")))
+        if "hledger-web" in ui and not shutil.which("hledger-web"):
+            warn("hledger-web selected but not installed — "
+                 "apt install hledger-web, then re-run "
+                 "`budge setup --services-only`")
     else:
         say(
-            "\nTo install the timers + dashboard (needs root):\n"
-            f"  sudo cp {rendered}/budge-* {rendered}/paisa.service "
+            "\nTo install the timers + chosen UIs (needs root):\n"
+            f"  sudo cp {rendered}/budge-* {rendered}/*.service "
             "/etc/systemd/system/\n"
             "  sudo systemctl daemon-reload\n"
             "  sudo systemctl enable --now budge-fetch.timer "
             "budge-categorize.timer budge-push.timer "
-            "budge-review-nudge.timer paisa.service"
+            "budge-review-nudge.timer"
+            + "".join(f" {s}.service" for s in
+                      ("paisa", "hledger-web") if s in ui)
         )
+
+
+def _toggle_service(unit: str, wanted: bool) -> None:
+    """Idempotently converge a service on the operator's UI choice."""
+    if wanted:
+        run(["systemctl", "reset-failed", unit], check=False)
+        run(["systemctl", "enable", "--now", unit], check=False)
+        run(["systemctl", "restart", unit], check=False)
+        say(f"{unit}: enabled and (re)started")
+    else:
+        run(["systemctl", "disable", "--now", unit], check=False)
+
+
+def _ui_extras(cfg) -> None:
+    """Non-service UIs: install/hint per the operator's choices."""
+    ui = cfg.ui_enabled
+    if "hledger-ui" in ui:
+        if shutil.which("hledger-ui"):
+            say("hledger-ui: run `hledger-ui` in any terminal "
+                "(LEDGER_FILE is configured)")
+        else:
+            warn("hledger-ui selected but not installed — "
+                 "apt install hledger-ui")
+    if "hledger-textual" in ui:
+        if not shutil.which("hledger-textual") and shutil.which("pipx"):
+            if not dry("pipx install hledger-textual"):
+                run(["pipx", "install", "hledger-textual"], check=False)
+        if shutil.which("hledger-textual"):
+            say("hledger-textual: run `hledger-textual` in any terminal")
+        else:
+            warn("hledger-textual not installed — try: "
+                 "pipx install hledger-textual")
+        warn("hledger-textual can EDIT/DELETE transactions. Editing "
+             "main.journal that way is legitimate hledger usage, but NEVER "
+             "edit pending.journal with it — that file is derived and "
+             "regeneration will discard such edits (use `budge review`)")
 
 
 def _paisa(cfg) -> None:
     repo = cfg.repo
+    if "paisa" not in cfg.ui_enabled:
+        return
     paisa_yaml = repo / "paisa.yaml"
     content = (
         "# paisa.yaml — stock Paisa dashboard config (no modifications\n"
@@ -514,6 +579,7 @@ def run_setup(cfg, services_only: bool = False) -> None:
         rendered = _render_units(cfg)
         _paisa(cfg)
         _install_units(cfg, rendered)
+        _ui_extras(cfg)
         _configure_ledger_file(cfg)
         return
     banner("setup — safe to re-run; Enter keeps any existing value")
@@ -525,8 +591,9 @@ def run_setup(cfg, services_only: bool = False) -> None:
     _github_remote(cfg)
     _backfill(cfg)
     rendered = _render_units(cfg)
-    _install_units(cfg, rendered)
     _paisa(cfg)
+    _install_units(cfg, rendered)
+    _ui_extras(cfg)
     _configure_ledger_file(cfg)
     commit_all(cfg.repo, "budge setup: configuration artifacts")
 
