@@ -58,7 +58,8 @@ def _check_prereqs(cfg) -> None:
                         ("git", ["git", "--version"])]:
         try:
             out = run(probe).stdout.strip().splitlines()[0]
-            say(f"  {out}")
+            where = shutil.which(probe[0]) or probe[0]
+            say(f"  {out}  ({where})")
         except Exception:
             missing.append(tool)
     version = _hledger_version(cfg)
@@ -503,13 +504,20 @@ def _toggle_service(unit: str, wanted: bool) -> None:
 
 
 def _apt_install(package: str) -> None:
-    """Best-effort install of a missing UI tool (root + apt only)."""
+    """Best-effort install of a missing UI tool (root + apt only) — and say
+    so plainly when it does not work."""
     if os.geteuid() != 0 or not shutil.which("apt-get"):
         return
     if dry(f"apt-get install {package}"):
         return
     say(f"installing {package}...")
-    run(["apt-get", "install", "-y", "-qq", package], check=False)
+    proc = run(["apt-get", "install", "-y", "-qq", package], check=False)
+    if proc.returncode != 0:
+        warn(f"apt-get install {package} failed: "
+             + (proc.stderr.strip().splitlines() or ["no error output"])[-1])
+    elif not shutil.which(package):
+        warn(f"apt reported success but {package} is still not on PATH "
+             f"(PATH={os.environ.get('PATH', '')})")
 
 
 def _ui_extras(cfg) -> None:

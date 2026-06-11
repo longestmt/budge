@@ -12,10 +12,17 @@ queries, and validation are hledger commands the operator runs directly:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from . import util
 from .config import Config
+
+# Some LXC consoles have a PATH without /usr/local/bin — where manually
+# installed tools (newer hledger etc.) live. Normalize once so budge's tool
+# resolution never depends on how the operator logged in.
+if "/usr/local/bin" not in os.environ.get("PATH", "").split(":"):
+    os.environ["PATH"] = "/usr/local/bin:" + os.environ.get("PATH", "")
 
 
 def main(argv=None) -> int:
