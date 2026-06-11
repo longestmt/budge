@@ -86,6 +86,19 @@ def test_notifier_is_outbound_only():
                                             "URLOPEN"), needle
 
 
+def test_first_push_sets_upstream(env, tmp_path):
+    """A repo with a remote but no upstream must push, not fail (the
+    budge-push timer hit this on night one)."""
+    from budge.gitutil import git, push
+    bare = tmp_path / "remote.git"
+    git(env.repo, "init", "--bare", str(bare))
+    git(env.repo, "remote", "add", "origin", str(bare))
+    push(env.repo)   # first push: sets upstream
+    push(env.repo)   # second push: normal path
+    branches = git(env.repo, "ls-remote", "--heads", "origin").stdout
+    assert "main" in branches
+
+
 def test_ledger_file_configured_idempotently(env):
     from budge.setup_cmd import _configure_ledger_file
     from pathlib import Path

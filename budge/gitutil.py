@@ -37,7 +37,16 @@ def push(repo: Path) -> None:
     if not remotes:
         warn("no git remote configured; skipping push")
         return
-    git(repo, "push", "-q")
+    # First-ever push has no upstream tracking; set it rather than fail.
+    has_upstream = git(repo, "rev-parse", "--abbrev-ref",
+                       "--symbolic-full-name", "@{u}", check=False
+                       ).returncode == 0
+    if has_upstream:
+        git(repo, "push", "-q")
+    else:
+        branch = git(repo, "rev-parse", "--abbrev-ref",
+                     "HEAD").stdout.strip() or "main"
+        git(repo, "push", "-q", "-u", remotes[0], branch)
 
 
 def head_commit(repo: Path) -> str:
