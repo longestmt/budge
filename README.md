@@ -1,4 +1,6 @@
-# budge
+<p align="center">
+  <img src="assets/logo.png" alt="budge — a thumbs-up budgie with a terminal and a coin" width="420">
+</p>
 
 **budge is a self-hosted household budgeting system that runs itself.** Bank
 transactions flow in automatically every morning, an AI takes a first pass at
