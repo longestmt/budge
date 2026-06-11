@@ -23,6 +23,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 sudo -u "$REAL_USER" pipx install --force "$SCRIPT_DIR" >/dev/null
 sudo -u "$REAL_USER" pipx ensurepath >/dev/null || true
 
+# pipx installs into ~/.local/bin, which is often NOT on PATH (and never on
+# sudo's or systemd's). Symlink into /usr/local/bin so `budge` works
+# everywhere without shell-config changes.
+REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+ln -sf "$REAL_HOME/.local/bin/budge" /usr/local/bin/budge
+say "budge available globally at /usr/local/bin/budge"
+
 say "installing the budge man page"
 install -D -m 0644 "$SCRIPT_DIR/budge.1" /usr/local/share/man/man1/budge.1
 command -v mandb >/dev/null && mandb -q || true
@@ -30,4 +37,5 @@ command -v mandb >/dev/null && mandb -q || true
 say "prerequisites done — starting interactive setup as ${REAL_USER}"
 # The interactive phase is idempotent and never needs root except for the
 # systemd install step, which prints exact sudo commands if it can't write.
-exec sudo -u "$REAL_USER" -i budge setup
+# Absolute path: sudo/login shells don't reliably see ~/.local/bin.
+exec sudo -u "$REAL_USER" -i /usr/local/bin/budge setup
