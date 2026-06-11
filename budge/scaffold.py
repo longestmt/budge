@@ -60,6 +60,8 @@ secrets*
 *.pem
 # hledger .latest state (budge uses import/state/ ID files instead)
 .latest*
+# paisa's derived database cache
+paisa.db*
 # editor litter
 *~
 *.swp

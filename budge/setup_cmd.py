@@ -373,21 +373,30 @@ def _install_units(cfg, rendered: Path) -> None:
     if dry("install + enable systemd timers"):
         return
     if os.access(target, os.W_OK):
-        for unit in rendered.glob("budge-*"):
+        units = list(rendered.glob("budge-*")) \
+            + list(rendered.glob("paisa.service"))
+        for unit in units:
             shutil.copy(unit, target / unit.name)
         run(["systemctl", "daemon-reload"], check=False)
         for timer in ["budge-fetch.timer", "budge-categorize.timer",
                       "budge-push.timer", "budge-review-nudge.timer"]:
             run(["systemctl", "enable", "--now", timer], check=False)
-        say("systemd timers installed and enabled")
+        if shutil.which("podman") or shutil.which("docker"):
+            run(["systemctl", "enable", "--now", "paisa.service"],
+                check=False)
+            say("systemd timers + paisa dashboard installed and enabled")
+        else:
+            say("systemd timers installed; paisa.service installed but not "
+                "started (no container runtime found)")
     else:
         say(
-            "\nTo install the timers (needs root):\n"
-            f"  sudo cp {rendered}/budge-* /etc/systemd/system/\n"
+            "\nTo install the timers + dashboard (needs root):\n"
+            f"  sudo cp {rendered}/budge-* {rendered}/paisa.service "
+            "/etc/systemd/system/\n"
             "  sudo systemctl daemon-reload\n"
             "  sudo systemctl enable --now budge-fetch.timer "
             "budge-categorize.timer budge-push.timer "
-            "budge-review-nudge.timer"
+            "budge-review-nudge.timer paisa.service"
         )
 
 
@@ -395,19 +404,22 @@ def _paisa(cfg) -> None:
     repo = cfg.repo
     paisa_yaml = repo / "paisa.yaml"
     if not paisa_yaml.exists() and not dry(f"write {paisa_yaml}"):
+        # db_path must live under the repo: that's the only path the Paisa
+        # container mounts. (paisa.db is gitignored — it's a derived cache.)
         paisa_yaml.write_text(
             "# paisa.yaml — stock Paisa dashboard config (no modifications\n"
             "# to Paisa itself; it simply reads the hledger journal).\n"
             f"journal_path: {repo / 'main.journal'}\n"
-            f"db_path: {config_dir() / 'paisa.db'}\n"
+            f"db_path: {repo / 'paisa.db'}\n"
             "ledger_cli: hledger\n"
             "default_currency: USD\n"
             "locale: en-US\n",
             encoding="utf-8",
         )
         say(f"wrote {paisa_yaml}")
-    say("Paisa serves the dashboard via the rendered paisa.service "
-        "(container) — see systemd/ in the repo.")
+    say("Paisa dashboard: http://<this-host>:7500 once paisa.service is "
+        "running (no auth built in — keep it LAN-only or front it with "
+        "your own proxy).")
 
 
 def run_setup(cfg) -> None:
