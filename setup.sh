@@ -28,7 +28,14 @@ sudo -u "$REAL_USER" pipx ensurepath >/dev/null || true
 # everywhere without shell-config changes.
 REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
 ln -sf "$REAL_HOME/.local/bin/budge" /usr/local/bin/budge
-say "budge available globally at /usr/local/bin/budge (pipx's PATH note above is handled by this symlink)"
+# Some LXC consoles (pct enter, su without '-') have a PATH that omits
+# /usr/local/bin entirely; verify the command actually resolves, and fall
+# back to /usr/bin which is always on PATH.
+if ! command -v budge >/dev/null 2>&1; then
+    ln -sf "$REAL_HOME/.local/bin/budge" /usr/bin/budge
+fi
+BUDGE_CMD="$(command -v budge || echo /usr/bin/budge)"
+say "budge available globally at ${BUDGE_CMD} (pipx's PATH note above is handled by this symlink)"
 
 say "installing the budge man page"
 install -D -m 0644 "$SCRIPT_DIR/budge.1" /usr/local/share/man/man1/budge.1
@@ -40,4 +47,4 @@ say "prerequisites done — starting interactive setup as ${REAL_USER}"
 # The interactive phase is idempotent and never needs root except for the
 # systemd install step, which prints exact sudo commands if it can't write.
 # Absolute path: sudo/login shells don't reliably see ~/.local/bin.
-exec sudo -u "$REAL_USER" -i /usr/local/bin/budge setup
+exec sudo -u "$REAL_USER" -i "$BUDGE_CMD" setup
