@@ -1,21 +1,27 @@
 # paisa — STOCK dashboard container pointed at the journal (PRD: in scope as
 # deployment config only; no modifications to Paisa itself).
 #
-# Container route (default). For a native binary instead, install paisa from
+# Contract per https://paisa.fyi/getting-started/installation/#docker :
+#   - the image keeps everything under /root/Documents/paisa/ — we mount the
+#     data repo there, so paisa.yaml sits exactly where Paisa looks for it
+#   - the default image bundles only `ledger`; the -hledger variant is
+#     required because the journal is hledger format
+#
+# For a native binary instead, install paisa from
 # https://github.com/ananthakumaran/paisa/releases and use:
 #   ExecStart=/usr/local/bin/paisa serve -c @REPO@/paisa.yaml
+# (and change the paths inside paisa.yaml to host paths).
 [Unit]
 Description=Paisa dashboard (stock container) for the budge journal
 Wants=network-online.target
 After=network-online.target
 
 [Service]
-ExecStartPre=-/usr/bin/podman pull docker.io/ananthakumaran/paisa:latest
+ExecStartPre=-/usr/bin/podman pull docker.io/ananthakumaran/paisa:latest-hledger
 ExecStart=/usr/bin/podman run --rm --name paisa \
     -p 7500:7500 \
-    -v @REPO@:@REPO@:rw \
-    -v @REPO@/paisa.yaml:/root/paisa.yaml:ro \
-    docker.io/ananthakumaran/paisa:latest
+    -v @REPO@:/root/Documents/paisa:rw \
+    docker.io/ananthakumaran/paisa:latest-hledger
 ExecStop=/usr/bin/podman stop paisa
 Restart=on-failure
 SyslogIdentifier=paisa

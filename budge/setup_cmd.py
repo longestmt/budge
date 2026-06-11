@@ -387,8 +387,10 @@ def _install_units(cfg, rendered: Path) -> None:
                       "budge-push.timer", "budge-review-nudge.timer"]:
             run(["systemctl", "enable", "--now", timer], check=False)
         if shutil.which("podman") or shutil.which("docker"):
+            run(["systemctl", "reset-failed", "paisa.service"], check=False)
             run(["systemctl", "enable", "--now", "paisa.service"],
                 check=False)
+            run(["systemctl", "restart", "paisa.service"], check=False)
             say("systemd timers + paisa dashboard installed and enabled")
         else:
             say("systemd timers installed; paisa.service installed but not "
@@ -408,19 +410,26 @@ def _install_units(cfg, rendered: Path) -> None:
 def _paisa(cfg) -> None:
     repo = cfg.repo
     paisa_yaml = repo / "paisa.yaml"
-    if not paisa_yaml.exists() and not dry(f"write {paisa_yaml}"):
-        # db_path must live under the repo: that's the only path the Paisa
-        # container mounts. (paisa.db is gitignored — it's a derived cache.)
-        paisa_yaml.write_text(
-            "# paisa.yaml — stock Paisa dashboard config (no modifications\n"
-            "# to Paisa itself; it simply reads the hledger journal).\n"
-            f"journal_path: {repo / 'main.journal'}\n"
-            f"db_path: {repo / 'paisa.db'}\n"
-            "ledger_cli: hledger\n"
-            "default_currency: USD\n"
-            "locale: en-US\n",
-            encoding="utf-8",
-        )
+    content = (
+        "# paisa.yaml — stock Paisa dashboard config (no modifications\n"
+        "# to Paisa itself; it simply reads the hledger journal).\n"
+        "# Paths are CONTAINER paths: paisa.service mounts the data repo\n"
+        "# at /root/Documents/paisa, the location the Paisa image uses.\n"
+        "# (Running a native paisa binary instead? Point these at the\n"
+        "# host paths.)\n"
+        "journal_path: /root/Documents/paisa/main.journal\n"
+        "db_path: /root/Documents/paisa/paisa.db\n"
+        "ledger_cli: hledger\n"
+        "default_currency: USD\n"
+        "locale: en-US\n"
+    )
+    if paisa_yaml.exists() and paisa_yaml.read_text(
+            encoding="utf-8") != content:
+        if not dry(f"update {paisa_yaml}"):
+            paisa_yaml.write_text(content, encoding="utf-8")
+            say(f"updated {paisa_yaml}")
+    elif not paisa_yaml.exists() and not dry(f"write {paisa_yaml}"):
+        paisa_yaml.write_text(content, encoding="utf-8")
         say(f"wrote {paisa_yaml}")
     say("Paisa dashboard: http://<this-host>:7500 once paisa.service is "
         "running (no auth built in — keep it LAN-only or front it with "
