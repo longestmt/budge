@@ -648,7 +648,9 @@ def _configure_ledger_file(cfg) -> None:
     directory — the journal location is configured once, at setup.
     """
     lines = [f'export LEDGER_FILE="{cfg.repo / "main.journal"}"']
-    if "/usr/local/bin" not in os.environ.get("PATH", ""):
+    shell_path = os.environ.get("BUDGE_ORIG_PATH",
+                                os.environ.get("PATH", ""))
+    if "/usr/local/bin" not in shell_path.split(":"):
         # some LXC consoles omit it; manually-installed tools (newer
         # hledger, etc.) live there and should win over apt's versions
         lines.append('export PATH="/usr/local/bin:$PATH"')

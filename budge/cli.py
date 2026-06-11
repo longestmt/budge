@@ -20,7 +20,9 @@ from .config import Config
 
 # Some LXC consoles have a PATH without /usr/local/bin — where manually
 # installed tools (newer hledger etc.) live. Normalize once so budge's tool
-# resolution never depends on how the operator logged in.
+# resolution never depends on how the operator logged in. The ORIGINAL is
+# kept so setup can still detect (and fix) the operator's shell environment.
+os.environ.setdefault("BUDGE_ORIG_PATH", os.environ.get("PATH", ""))
 if "/usr/local/bin" not in os.environ.get("PATH", "").split(":"):
     os.environ["PATH"] = "/usr/local/bin:" + os.environ.get("PATH", "")
 
