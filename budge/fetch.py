@@ -25,7 +25,7 @@ from pathlib import Path
 
 from . import hledger, journal, simplefin
 from .gitutil import commit_all
-from .scaffold import load_accounts
+from .scaffold import declare_account, load_accounts
 from .util import confirm, die, dry, say, warn
 
 CSV_FIELDS = ["id", "date", "amount", "payee", "memo"]
@@ -172,6 +172,26 @@ def sf_rows(sf_account: dict) -> list:
     return rows
 
 
+def _ledger_balance(repo: Path, account: str) -> float:
+    """Current journal balance of an account as a float (0.0 if none)."""
+    raw = hledger.account_balance(Path(repo) / "main.journal", account)
+    m = re.search(r"-?[\d,]+\.?\d*", raw.replace("$", ""))
+    return float(m.group(0).replace(",", "")) if m else 0.0
+
+
+def market_adjustment_entry(date: str, account: str, diff: float,
+                            currency: str) -> str:
+    """Unrealized gain/loss posting for accounts whose market value moves
+    without transactions (brokerage, stock plans). Keeps the daily balance
+    assertion truthful instead of failing on every market move."""
+    return (
+        f"{date} * market value adjustment (simplefin)\n"
+        f"    ; unrealized gain/loss reconciling reported market value\n"
+        f"    {account:<40s}  {_amount_str(f'{diff:.2f}', currency)}\n"
+        f"    equity:unrealized-gains\n"
+    )
+
+
 def assertion_entry(date: str, account: str, balance: str, currency: str,
                     note: str = "") -> str:
     bal = _amount_str(balance, currency)
@@ -272,23 +292,42 @@ def run_fetch(cfg, backfill_days: int = None, interactive: bool = False):
                 n_pending += 1
         record_ids(repo, acct["slug"], [r["id"] for r in new_rows])
 
-        if backfill_days and new_rows:
-            # opening balance so that opening + transactions = reported balance
+        if backfill_days and "balance" in sf:
+            # Opening balance so that opening + transactions = reported
+            # balance. Written even when the account has ZERO transactions
+            # in the window (common for brokerage/stock-plan accounts) —
+            # otherwise the assertion below is guaranteed to fail.
+            already = acct["account"] in (
+                (repo / "main.journal").read_text(encoding="utf-8"))
             total = sum(float(r["amount"]) for r in new_rows)
             reported = float(sf.get("balance", 0))
             opening = round(reported - total, 2)
-            first = min(r["date"] for r in new_rows)
-            open_date = (dt.date.fromisoformat(first)
-                         - dt.timedelta(days=1)).isoformat()
-            main_texts.insert(0, (
-                f"{open_date} * opening balances\n"
-                f"    ; computed by budge setup: reported {reported:.2f}"
-                f" - imported txns {total:.2f}\n"
-                f"    {acct['account']:<40s}  "
-                f"{_amount_str(f'{opening:.2f}', currency)}\n"
-                f"    {journal.OPENING}\n"
-            ))
-        if "balance" in (sf or {}):
+            if abs(opening) >= 0.005 and not already:
+                first = min((r["date"] for r in new_rows), default=None)
+                open_date = (
+                    dt.date.fromisoformat(first) - dt.timedelta(days=1)
+                    if first else
+                    dt.date.today() - dt.timedelta(days=backfill_days)
+                ).isoformat()
+                main_texts.insert(0, (
+                    f"{open_date} * opening balances\n"
+                    f"    ; computed by budge setup: reported {reported:.2f}"
+                    f" - imported txns {total:.2f}\n"
+                    f"    {acct['account']:<40s}  "
+                    f"{_amount_str(f'{opening:.2f}', currency)}\n"
+                    f"    {journal.OPENING}\n"
+                ))
+        if "balance" in sf:
+            if acct.get("drift") and not backfill_days:
+                # Market-valued account: reconcile value changes that have
+                # no transactions behind them before asserting.
+                ledger = _ledger_balance(repo, acct["account"]) \
+                    + sum(float(r["amount"]) for r in new_rows)
+                diff = round(float(sf["balance"]) - ledger, 2)
+                if abs(diff) >= 0.01:
+                    declare_account(repo, "equity:unrealized-gains")
+                    main_texts.append(market_adjustment_entry(
+                        today, acct["account"], diff, currency))
             _remove_old_assertion(repo, acct["account"])
             main_texts.append(assertion_entry(
                 today, acct["account"], str(sf["balance"]), currency))

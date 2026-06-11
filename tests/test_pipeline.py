@@ -10,7 +10,7 @@ from budge.gitutil import git, head_commit
 from budge import util
 
 from conftest import (card_account, checking_account, consistent_balance,
-                      txn)
+                      invest_account, txn)
 
 
 def _checking_txns():
@@ -133,6 +133,50 @@ def test_dry_run_writes_nothing_A12(env, simplefin_server):
     assert head_commit(env.repo) == before_head
     assert git(env.repo, "status", "--porcelain").stdout.strip() == ""
     assert not list((env.repo / "import" / "raw").glob("*/*.csv"))
+
+
+def test_zero_transaction_account_gets_opening_balance(env, simplefin_server):
+    """A backfilled account with no transactions in the window (e.g. a stock
+    plan) still reconciles: opening balance = reported balance."""
+    simplefin_server.accounts = [invest_account("39311.40")]
+    run_fetch(env.cfg, backfill_days=90, interactive=False)
+    ok, out = hledger.check(env.repo / "main.journal")
+    assert ok, out
+    bal = hledger.account_balance(env.repo / "main.journal",
+                                  "assets:stock-plan")
+    assert "39311.40" in bal.replace(",", "")
+
+
+def test_drift_account_absorbs_market_moves(env, simplefin_server):
+    """Investment value changes without transactions must not fail the daily
+    assertion — they post as unrealized gains/losses."""
+    simplefin_server.accounts = [invest_account("39311.40")]
+    run_fetch(env.cfg, backfill_days=90, interactive=False)
+
+    simplefin_server.accounts = [invest_account("39851.15")]  # market up
+    run_fetch(env.cfg)
+    ok, out = hledger.check(env.repo / "main.journal")
+    assert ok, out
+    main = (env.repo / "main.journal").read_text()
+    assert "market value adjustment" in main
+    gains = hledger.account_balance(env.repo / "main.journal",
+                                    "equity:unrealized-gains")
+    assert "539.75" in gains.replace(",", "")
+
+    simplefin_server.accounts = [invest_account("39000.00")]  # market down
+    run_fetch(env.cfg)
+    ok, out = hledger.check(env.repo / "main.journal")
+    assert ok, out
+
+
+def test_backfill_rerun_does_not_duplicate_opening(env, simplefin_server):
+    simplefin_server.accounts = [invest_account("39311.40")]
+    run_fetch(env.cfg, backfill_days=90, interactive=False)
+    run_fetch(env.cfg, backfill_days=90, interactive=False)  # re-run
+    main = (env.repo / "main.journal").read_text()
+    assert main.count("* opening balances") == 1
+    ok, out = hledger.check(env.repo / "main.journal")
+    assert ok, out
 
 
 def test_informational_simplefin_message_is_not_fatal(env, simplefin_server,

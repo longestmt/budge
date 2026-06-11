@@ -284,13 +284,17 @@ def _map_accounts(cfg) -> None:
             .lower().split())[:30] or "account"
         slug = prompt("  short slug for files", default_slug)
         kind = choose("  what kind of account is this?", [
-            ("assets:", "checking / savings (asset)"),
-            ("liabilities:", "credit card / line of credit (liability)"),
+            ("asset", "checking / savings (asset)"),
+            ("liability", "credit card / line of credit (liability)"),
+            ("invest", "investment / brokerage / stock plan (market value "
+                       "changes without transactions)"),
         ])
-        hl_account = prompt("  hledger account name", kind + slug)
+        prefix = "liabilities:" if kind == "liability" else "assets:"
+        hl_account = prompt("  hledger account name", prefix + slug)
         accounts.append({
             "id": sf["id"], "name": f"{org} {name}".strip(),
             "slug": slug, "account": hl_account, "currency": "$",
+            "drift": kind == "invest",
         })
         declare_account(repo, hl_account)
         if not dry(f"seed rules file for {slug}"):

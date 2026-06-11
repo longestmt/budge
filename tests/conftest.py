@@ -211,6 +211,9 @@ def env(tmp_path, fake_ai, monkeypatch):
          "slug": "checking", "account": "assets:checking", "currency": "$"},
         {"id": "act-card", "name": "TestBank Card",
          "slug": "card", "account": "liabilities:card", "currency": "$"},
+        {"id": "act-invest", "name": "TestBank Stock Plan",
+         "slug": "stock-plan", "account": "assets:stock-plan",
+         "currency": "$", "drift": True},
     ]
     save_accounts(repo, accounts)
     for a in accounts:
@@ -251,6 +254,12 @@ def card_account(transactions, balance):
     return {"id": "act-card", "name": "Card",
             "org": {"name": "TestBank"}, "currency": "USD",
             "balance": str(balance), "transactions": transactions}
+
+
+def invest_account(balance, transactions=()):
+    return {"id": "act-invest", "name": "Stock Plan",
+            "org": {"name": "TestBank"}, "currency": "USD",
+            "balance": str(balance), "transactions": list(transactions)}
 
 
 def consistent_balance(opening, transactions):

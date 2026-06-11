@@ -30,6 +30,7 @@ ACCOUNTS_SKELETON = """\
 
 account assets:transfers          ; clearing account: card payments & transfers
 account equity:opening-balances
+account equity:unrealized-gains   ; market-value drift on investment accounts
 account expenses:uncategorized    ; AI could not categorize; fix in review
 """
 
