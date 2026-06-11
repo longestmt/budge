@@ -495,6 +495,18 @@ def _ui_extras(cfg) -> None:
             warn("hledger-ui selected but not installed — "
                  "apt install hledger-ui")
     if "hledger-textual" in ui:
+        # hledger-textual passes --no-conf, which needs hledger >= 1.40
+        try:
+            import re as _re
+            v = run([cfg.hledger_bin(), "--version"]).stdout
+            m = _re.search(r"hledger (\d+)\.(\d+)", v)
+            if m and (int(m.group(1)), int(m.group(2))) < (1, 40):
+                warn(f"hledger-textual needs hledger >= 1.40 (you have "
+                     f"{m.group(0)}). Install the official binary from "
+                     "https://github.com/simonmichael/hledger/releases "
+                     "into /usr/local/bin first.")
+        except Exception:
+            pass
         if not shutil.which("hledger-textual") and shutil.which("pipx"):
             if not dry("pipx install hledger-textual"):
                 run(["pipx", "install", "hledger-textual"], check=False)
@@ -547,6 +559,10 @@ def _configure_ledger_file(cfg) -> None:
     directory — the journal location is configured once, at setup.
     """
     lines = [f'export LEDGER_FILE="{cfg.repo / "main.journal"}"']
+    if "/usr/local/bin" not in os.environ.get("PATH", ""):
+        # some LXC consoles omit it; manually-installed tools (newer
+        # hledger, etc.) live there and should win over apt's versions
+        lines.append('export PATH="/usr/local/bin:$PATH"')
     if "UTF-8" not in (os.environ.get("LC_ALL")
                        or os.environ.get("LANG") or ""):
         # hledger needs a UTF-8 locale to read UTF-8 journals; minimal LXC
