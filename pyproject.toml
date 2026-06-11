@@ -14,3 +14,6 @@ budge = "budge.cli:main"
 
 [tool.setuptools]
 packages = ["budge"]
+
+[tool.setuptools.package-data]
+budge = ["systemd/*.in"]

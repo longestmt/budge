@@ -337,8 +337,9 @@ def _backfill(cfg) -> None:
 def _render_units(cfg) -> Path:
     """Render unit templates with concrete paths into <repo>/systemd/."""
     import budge
-    pkg_dir = Path(budge.__file__).resolve().parent.parent
-    src = pkg_dir / "systemd"
+    # Templates ship INSIDE the package (budge/systemd/) so they exist in
+    # pipx/pip installs, not just source checkouts.
+    src = Path(budge.__file__).resolve().parent / "systemd"
     dst = cfg.repo / "systemd"
     if dry(f"render systemd unit templates into {dst}"):
         return dst
@@ -372,9 +373,13 @@ def _install_units(cfg, rendered: Path) -> None:
     target = Path("/etc/systemd/system")
     if dry("install + enable systemd timers"):
         return
+    units = list(rendered.glob("budge-*")) \
+        + list(rendered.glob("paisa.service"))
+    if not units:
+        warn("nothing to install — no rendered units found in "
+             f"{rendered} (was the render step skipped?)")
+        return
     if os.access(target, os.W_OK):
-        units = list(rendered.glob("budge-*")) \
-            + list(rendered.glob("paisa.service"))
         for unit in units:
             shutil.copy(unit, target / unit.name)
         run(["systemctl", "daemon-reload"], check=False)
