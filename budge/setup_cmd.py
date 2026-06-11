@@ -702,6 +702,7 @@ def run_ui(cfg, show_only: bool = False) -> None:
     _paisa(cfg)
     _install_units(cfg, rendered)
     _ui_status(cfg)
+    _configure_ledger_file(cfg)  # keeps PATH/locale/LEDGER_FILE current too
 
 
 def run_setup(cfg, services_only: bool = False) -> None:
