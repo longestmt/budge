@@ -422,7 +422,16 @@ def _paisa(cfg) -> None:
         "your own proxy).")
 
 
-def run_setup(cfg) -> None:
+def run_setup(cfg, services_only: bool = False) -> None:
+    if services_only:
+        # Re-render and (re)install systemd units + the Paisa dashboard from
+        # existing configuration — no prompts, no wizard, no data changes.
+        banner("setup --services-only — timers + dashboard from existing "
+               "config")
+        rendered = _render_units(cfg)
+        _paisa(cfg)
+        _install_units(cfg, rendered)
+        return
     banner("setup — safe to re-run; Enter keeps any existing value")
     _check_prereqs(cfg)
     cfg, ai_key = _collect_config(cfg)

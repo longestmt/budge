@@ -28,7 +28,10 @@ def main(argv=None) -> int:
                         help="print intended actions; write nothing (A12)")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("setup", help="interactive bootstrap (PRD 7.1)")
+    p = sub.add_parser("setup", help="interactive bootstrap (PRD 7.1)")
+    p.add_argument("--services-only", action="store_true",
+                   help="just (re)render and install systemd units + the "
+                        "Paisa dashboard from existing config; no prompts")
 
     p = sub.add_parser("fetch", help="SimpleFIN pull + rules-first import "
                                      "(PRD 7.2)")
@@ -68,7 +71,7 @@ def main(argv=None) -> int:
     try:
         if args.command == "setup":
             from .setup_cmd import run_setup
-            run_setup(cfg)
+            run_setup(cfg, services_only=args.services_only)
         elif args.command == "fetch":
             from .fetch import run_fetch
             run_fetch(cfg, backfill_days=args.backfill,
