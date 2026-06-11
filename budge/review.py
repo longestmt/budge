@@ -67,8 +67,10 @@ def _transfers_warning(repo: Path) -> None:
     if bal and not re.fullmatch(r"\$?0(\.0+)?", bal.replace(",", "")):
         warn(
             f"assets:transfers does not net to zero (balance: {bal}). "
-            "One side of a transfer/card payment is missing or miscoded — "
-            "check with: hledger -f main.journal register assets:transfers"
+            "One side of a transfer/card payment is missing or miscoded "
+            "(often: the other account isn't connected to SimpleFIN) — "
+            "check with: hledger -f "
+            f"{repo / 'main.journal'} register assets:transfers"
         )
 
 

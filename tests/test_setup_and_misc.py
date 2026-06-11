@@ -86,6 +86,22 @@ def test_notifier_is_outbound_only():
                                             "URLOPEN"), needle
 
 
+def test_ledger_file_configured_idempotently(env):
+    from budge.setup_cmd import _configure_ledger_file
+    from pathlib import Path
+    _configure_ledger_file(env.cfg)
+    _configure_ledger_file(env.cfg)  # re-run must not duplicate
+    rc = (Path.home() / ".bashrc").read_text()
+    expected = f'export LEDGER_FILE="{env.repo / "main.journal"}"'
+    assert rc.count(expected) == 1
+    # a stale LEDGER_FILE from an old repo path gets replaced
+    (Path.home() / ".bashrc").write_text(
+        'export LEDGER_FILE="/old/path/main.journal"\n')
+    _configure_ledger_file(env.cfg)
+    rc = (Path.home() / ".bashrc").read_text()
+    assert "/old/path" not in rc and rc.count(expected) == 1
+
+
 def test_choose_enumerated(answers, capsys):
     from budge.util import choose
     options = [("a", "Option A"), ("b", "Option B"), ("c", "Option C")]

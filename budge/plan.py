@@ -399,8 +399,8 @@ def bootstrap(cfg, household: dict) -> None:
     commit_all(repo, "budge plan: bootstrap budget")
     say("")
     success("wizard done — view the budget with: "
-       + paint("hledger -f main.journal balance --budget -M expenses",
-               "bold"))
+            + paint("hledger balance --budget -M expenses", "bold")
+            + paint("  (LEDGER_FILE is set by setup)", "dim"))
 
 
 def _write_budget(cfg, envelopes: dict) -> None:
@@ -564,7 +564,7 @@ def _render_budget_text(cfg, envelopes: dict) -> str:
     lines = [
         "; budget.journal — monthly envelopes "
         f"(written by budge plan, {dt.date.today().isoformat()})",
-        "; view: hledger -f main.journal balance --budget -M expenses",
+        "; view: hledger balance --budget -M expenses",
         "",
         "~ monthly",
     ]

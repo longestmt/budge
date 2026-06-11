@@ -436,6 +436,31 @@ def _paisa(cfg) -> None:
         "your own proxy).")
 
 
+def _configure_ledger_file(cfg) -> None:
+    """Point hledger at the journal for all interactive shells.
+
+    With LEDGER_FILE set, the operator types `hledger register ...` from any
+    directory — the journal location is configured once, at setup.
+    """
+    line = f'export LEDGER_FILE="{cfg.repo / "main.journal"}"'
+    rc = Path.home() / ".bashrc"
+    existing = rc.read_text(encoding="utf-8") if rc.exists() else ""
+    if line in existing:
+        return
+    if dry(f"set LEDGER_FILE in {rc}"):
+        return
+    cleaned = "\n".join(
+        l for l in existing.splitlines()
+        if "LEDGER_FILE" not in l or not l.strip().startswith("export")
+    )
+    with open(rc, "w", encoding="utf-8") as f:
+        f.write(cleaned.rstrip("\n")
+                + "\n\n# budge: hledger journal location (managed by "
+                  "budge setup)\n" + line + "\n")
+    say(f"LEDGER_FILE set in {rc} — plain `hledger` commands work from "
+        "anywhere (open a new shell or `source ~/.bashrc`)")
+
+
 def run_setup(cfg, services_only: bool = False) -> None:
     if services_only:
         # Re-render and (re)install systemd units + the Paisa dashboard from
@@ -445,6 +470,7 @@ def run_setup(cfg, services_only: bool = False) -> None:
         rendered = _render_units(cfg)
         _paisa(cfg)
         _install_units(cfg, rendered)
+        _configure_ledger_file(cfg)
         return
     banner("setup — safe to re-run; Enter keeps any existing value")
     _check_prereqs(cfg)
@@ -457,6 +483,7 @@ def run_setup(cfg, services_only: bool = False) -> None:
     rendered = _render_units(cfg)
     _install_units(cfg, rendered)
     _paisa(cfg)
+    _configure_ledger_file(cfg)
     commit_all(cfg.repo, "budge setup: configuration artifacts")
 
     # Budget wizard, bootstrap mode — setup succeeds even if skipped (7.1)
@@ -482,6 +509,6 @@ def run_setup(cfg, services_only: bool = False) -> None:
         "  weekly         OpenClaw nudges you; run `budge review` "
         "(~10 minutes)\n"
         "  anytime        the Paisa dashboard answers “how much is left?”\n"
-        "  reporting      plain hledger, e.g. "
-        "hledger -f main.journal balance --budget\n"
+        "  reporting      plain hledger from any directory, e.g. "
+        "hledger balance --budget -M expenses\n"
     )
