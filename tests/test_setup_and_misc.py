@@ -107,6 +107,18 @@ def test_ui_config_parsing(env):
     assert Config().ui_enabled  # default (no section) includes paisa
 
 
+def test_ui_command_updates_choice(env, answers, capsys):
+    from budge.config import Config
+    from budge.setup_cmd import run_ui
+    answers.extend(["3"])            # hledger-ui only
+    run_ui(Config())
+    assert Config().ui_enabled == {"hledger-ui"}
+    assert not (env.repo / "paisa.yaml").exists()   # paisa not configured
+    run_ui(Config(), show_only=True)
+    out = capsys.readouterr().out
+    assert "[x]" in out and "hledger-ui" in out
+
+
 def test_paisa_skipped_when_not_chosen(env):
     from budge.config import Config
     from budge.setup_cmd import _paisa

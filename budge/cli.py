@@ -60,6 +60,11 @@ def main(argv=None) -> int:
 
     sub.add_parser("push", help="git push the data repo")
 
+    p = sub.add_parser("ui", help="choose interactive UIs (paisa, "
+                                  "hledger-web/-ui/-textual) and apply")
+    p.add_argument("--show", action="store_true",
+                   help="print the current selection, change nothing")
+
     p = sub.add_parser("cheatsheet",
                        help="hledger recipes for common questions "
                             "(prints commands, never runs them)")
@@ -105,6 +110,9 @@ def main(argv=None) -> int:
         elif args.command == "push":
             from .gitutil import push
             push(cfg.repo)
+        elif args.command == "ui":
+            from .setup_cmd import run_ui
+            run_ui(cfg, show_only=args.show)
         elif args.command == "cheatsheet":
             from .cheatsheet import run_cheatsheet
             run_cheatsheet(args.topic)

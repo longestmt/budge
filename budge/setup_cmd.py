@@ -570,6 +570,36 @@ def _configure_ledger_file(cfg) -> None:
         "anywhere (open a new shell or `source ~/.bashrc`)")
 
 
+def run_ui(cfg, show_only: bool = False) -> None:
+    """`budge ui` — choose interactive UIs without the full setup flow."""
+    current = cfg.ui_enabled
+    if show_only:
+        for value, label in UI_OPTIONS:
+            mark = paint("[x]", "green", "bold") if value in current \
+                else "[ ]"
+            say(f"  {mark} {label}")
+        return
+    header("interactive UIs (any combination, or none)")
+    chosen = choose_multi("Which UIs do you want on this machine?",
+                          UI_OPTIONS, current)
+    ini = configparser.ConfigParser()
+    if conf_path().exists():
+        ini.read(conf_path(), encoding="utf-8")
+    if not ini.has_section("ui"):
+        ini.add_section("ui")
+    ini.set("ui", "enabled", ",".join(sorted(chosen)))
+    if not dry(f"write {conf_path()}"):
+        with open(conf_path(), "w", encoding="utf-8") as f:
+            ini.write(f)
+    cfg = Config()  # reload with the new choices
+    rendered = _render_units(cfg)
+    _paisa(cfg)
+    _install_units(cfg, rendered)
+    _ui_extras(cfg)
+    if chosen == current:
+        say("(no changes)")
+
+
 def run_setup(cfg, services_only: bool = False) -> None:
     if services_only:
         # Re-render and (re)install systemd units + the Paisa dashboard from
