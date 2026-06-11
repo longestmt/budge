@@ -132,6 +132,13 @@ as cleared; operator one-off corrections are preserved.
 .B push
 Push the data repository to its git remote.
 .TP
+.B cheatsheet \fR[\fItopic\fR]
+Print curated hledger recipes for common questions (find transactions by
+vendor/category/amount, monthly statements, budget views, pending-only
+filters). Prints commands only — budge never runs reports for you. An
+optional topic word filters the list, e.g.
+.BR "budge cheatsheet month" .
+.TP
 .B notify \fR[\fB\-\-unit\fR \fIUNIT\fR] [\fB\-\-review\-nudge\fR]
 Outbound notifications (used by the systemd units).
 .B \-\-unit

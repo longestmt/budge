@@ -60,6 +60,12 @@ def main(argv=None) -> int:
 
     sub.add_parser("push", help="git push the data repo")
 
+    p = sub.add_parser("cheatsheet",
+                       help="hledger recipes for common questions "
+                            "(prints commands, never runs them)")
+    p.add_argument("topic", nargs="?", default="",
+                   help="filter, e.g. 'vendor', 'month', 'budget'")
+
     p = sub.add_parser("notify", help="OpenClaw notifications (PRD 7.7)")
     p.add_argument("--unit", help="failed unit name (OnFailure hook)")
     p.add_argument("--review-nudge", action="store_true")
@@ -99,6 +105,9 @@ def main(argv=None) -> int:
         elif args.command == "push":
             from .gitutil import push
             push(cfg.repo)
+        elif args.command == "cheatsheet":
+            from .cheatsheet import run_cheatsheet
+            run_cheatsheet(args.topic)
         elif args.command == "notify":
             from .notify import notify_failure, notify_review_ready
             if args.review_nudge:

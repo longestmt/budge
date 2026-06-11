@@ -86,6 +86,20 @@ def test_notifier_is_outbound_only():
                                             "URLOPEN"), needle
 
 
+def test_cheatsheet_prints_recipes_without_running_them(capsys):
+    from budge.cheatsheet import run_cheatsheet
+    run_cheatsheet()
+    out = capsys.readouterr().out
+    assert "hledger register desc:" in out          # vendor recipe
+    assert "incomestatement" in out                  # statement recipe
+    assert "--budget" in out                         # budget recipe
+    run_cheatsheet("vendor")
+    out = capsys.readouterr().out
+    assert "desc:KROGER" in out and "incomestatement -M" not in out
+    run_cheatsheet("zzz-no-match")
+    assert "nothing matching" in capsys.readouterr().out
+
+
 def test_github_remote_normalization():
     from budge.setup_cmd import normalize_github_remote as norm
     ssh = "git@github.com:longestmt/longestbudget.git"
