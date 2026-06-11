@@ -195,9 +195,11 @@ def add_vendor_rule(repo: Path, slug: str, pattern: str, category: str) -> str:
     """
     path = Path(repo) / "import" / "rules" / f"{slug}.rules"
     old = path.read_text(encoding="utf-8")
+    block = f"if {pattern}\n account2 {category}\n\n"
+    if block in old:
+        return old  # idempotent: identical rule already present
     if dry(f"add rule to {path.name}: if {pattern} -> {category}"):
         return old
-    block = f"if {pattern}\n account2 {category}\n\n"
     idx = old.find(TRANSFER_MARKER)
     if idx == -1:
         new = old.rstrip("\n") + "\n\n" + block

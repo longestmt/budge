@@ -54,7 +54,7 @@ def complete(cfg, system: str, user: str) -> str:
             "x-api-key": cfg.ai_api_key,
             "anthropic-version": "2023-06-01",
         }
-        data = _post_json(url, body, headers)
+        data = _post_json(url, body, headers, timeout=cfg.ai_timeout)
         return "".join(
             b.get("text", "") for b in data.get("content", [])
         )
@@ -71,20 +71,21 @@ def complete(cfg, system: str, user: str) -> str:
     headers = {"content-type": "application/json"}
     if cfg.ai_api_key:
         headers["authorization"] = f"Bearer {cfg.ai_api_key}"
-    data = _post_json(url, body, headers)
+    data = _post_json(url, body, headers, timeout=cfg.ai_timeout)
     try:
         return data["choices"][0]["message"]["content"]
     except (KeyError, IndexError):
         raise AIError(f"unexpected response shape: {str(data)[:200]}")
 
 
-def _post_json(url: str, body: dict, headers: dict) -> dict:
+def _post_json(url: str, body: dict, headers: dict,
+               timeout: int = 300) -> dict:
     req = urllib.request.Request(
         url, data=json.dumps(body).encode("utf-8"), headers=headers,
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception as e:
         raise AIError(f"AI request failed: {e}")

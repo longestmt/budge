@@ -155,25 +155,42 @@ def bootstrap(cfg, household: dict) -> None:
 
     # AI clustering pass — payees and aggregate amounts only (no account
     # numbers, no balances, no full history: same minimization stance as 6).
-    merchants = [
+    all_merchants = [
         {"payee": p, "count": a["count"], "monthly_avg": a["monthly_avg"]}
         for p, a in sorted(agg.items(), key=lambda kv: kv[1]["count"],
                            reverse=True)
         if a["count"] >= 1
-    ][:150]
-    user = json.dumps({
-        "monthly_take_home": household["income"],
-        "monthly_savings_target": household["savings"],
-        "context": household["goals"],
-        "merchants": merchants,
-    }, ensure_ascii=False)
-    say("analyzing your transactions...")
-    try:
-        reply = ai.complete(cfg, WIZARD_SYSTEM, user)
-        parsed = ai.extract_json(reply) or {}
-    except ai.AIError as e:
-        warn(f"AI unavailable ({e}); you can still budget manually")
-        parsed = {}
+    ]
+    limit = 150
+    parsed = {}
+    while True:
+        merchants = all_merchants[:limit]
+        user = json.dumps({
+            "monthly_take_home": household["income"],
+            "monthly_savings_target": household["savings"],
+            "context": household["goals"],
+            "merchants": merchants,
+        }, ensure_ascii=False)
+        say(f"analyzing your transactions ({len(merchants)} merchants; this "
+            "can take a few minutes)...")
+        try:
+            reply = ai.complete(cfg, WIZARD_SYSTEM, user)
+            parsed = ai.extract_json(reply) or {}
+            break
+        except ai.AIError as e:
+            warn(f"the AI analysis failed: {e}")
+            from .util import choose
+            action = choose("What now?", [
+                ("retry", "Try again"),
+                ("fewer", "Try again with fewer merchants (smaller, faster "
+                          "request)"),
+                ("skip", "Continue without AI (generic starter chart; you "
+                         "can re-run `budge plan --bootstrap` later)"),
+            ])
+            if action == "skip":
+                break
+            if action == "fewer":
+                limit = max(40, limit // 2)
     categories = [
         c["account"].strip() for c in parsed.get("categories", [])
         if isinstance(c, dict)

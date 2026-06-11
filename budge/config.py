@@ -87,6 +87,12 @@ class Config:
     def ai_api_key(self) -> str:
         return self.secrets.get("AI_API_KEY", "")
 
+    @property
+    def ai_timeout(self) -> int:
+        """Seconds to wait on an AI request. Cloud models analyzing a big
+        merchant list can be slow; default generously."""
+        return int(self.ini.get("ai", "timeout", fallback="300"))
+
     # --- simplefin ---
     @property
     def simplefin_access_url(self) -> str:
