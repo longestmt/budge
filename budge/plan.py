@@ -561,12 +561,17 @@ def reassess(cfg, months: int = 3) -> None:
 def _render_budget_text(cfg, envelopes: dict) -> str:
     accounts = load_accounts(cfg.repo)
     balancing = accounts[0]["account"] if accounts else "assets:checking"
+    # The start date matters: without one, Paisa generates the envelope for
+    # every month in its evaluation window and rolls them all up, showing
+    # absurd "available" amounts. Anchored to the current month, exactly one
+    # occurrence exists so far (https://paisa.fyi/reference/budget/).
+    start = dt.date.today().replace(day=1).isoformat()
     lines = [
         "; budget.journal — monthly envelopes "
         f"(written by budge plan, {dt.date.today().isoformat()})",
         "; view: hledger balance --budget -M expenses",
         "",
-        "~ monthly",
+        f"~ monthly from {start}",
     ]
     for cat, amount in sorted(envelopes.items()):
         lines.append(f"    {cat:<40s}  ${amount:.2f}")
