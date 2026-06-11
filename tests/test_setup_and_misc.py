@@ -86,6 +86,20 @@ def test_notifier_is_outbound_only():
                                             "URLOPEN"), needle
 
 
+def test_github_remote_normalization():
+    from budge.setup_cmd import normalize_github_remote as norm
+    ssh = "git@github.com:longestmt/longestbudget.git"
+    https = "https://github.com/longestmt/longestbudget.git"
+    for given in ("longestmt/longestbudget", https, ssh,
+                  "https://github.com/longestmt/longestbudget",
+                  "github.com/longestmt/longestbudget"):
+        assert norm(given, "ssh") == ssh, given
+        assert norm(given, "https") == https, given
+    # non-GitHub URLs pass through untouched... if not owner/name shaped
+    assert norm("ssh://git.mybox.lan:2222/budge",
+                "ssh") != "git@github.com:budge.git"
+
+
 def test_first_push_sets_upstream(env, tmp_path):
     """A repo with a remote but no upstream must push, not fail (the
     budge-push timer hit this on night one)."""

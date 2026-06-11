@@ -306,17 +306,56 @@ def _map_accounts(cfg) -> None:
         "transfer/payment rule patterns seeded per account (PRD 7.3)")
 
 
+def normalize_github_remote(url: str, method: str) -> str:
+    """Accept owner/name or any GitHub URL form; emit the chosen transport."""
+    import re
+    m = re.search(
+        r"(?:github\.com[:/])?([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", url.strip())
+    if not m:
+        return url  # not GitHub-shaped; pass through untouched
+    owner, name = m.group(1), m.group(2)
+    if method == "ssh":
+        return f"git@github.com:{owner}/{name}.git"
+    return f"https://github.com/{owner}/{name}.git"
+
+
 def _github_remote(cfg) -> None:
     repo = cfg.repo
-    remotes = git(repo, "remote", check=False).stdout.split()
-    if remotes:
-        say("\ngit remote already configured")
+    current = git(repo, "remote", "get-url", "origin",
+                  check=False).stdout.strip()
+    if current:
+        say(f"\ngit remote already configured: {current}")
+        if not confirm("change it?", default=False):
+            return
+    url = prompt("\nGitHub repo for the journal (owner/name or URL — make "
+                 "it PRIVATE; blank to skip)", current)
+    if not url:
         return
-    url = prompt("\nGitHub remote URL for the journal repo (blank to skip)")
-    if url and not dry(f"git remote add origin {url}"):
-        git(repo, "remote", "add", "origin", url)
-        say("remote added — pushes use your ambient git auth "
-            "(SSH key or credential helper)")
+    method = choose("How should this machine authenticate pushes?", [
+        ("ssh", "SSH — a key in ~/.ssh added to GitHub (recommended for "
+                "unattended timers)"),
+        ("https", "HTTPS — requires a credential helper or personal "
+                  "access token"),
+    ])
+    final = normalize_github_remote(url, method)
+    if dry(f"git remote set origin {final}"):
+        return
+    if current:
+        git(repo, "remote", "set-url", "origin", final)
+    else:
+        git(repo, "remote", "add", "origin", final)
+    say(f"remote set: {final}")
+    if method == "ssh":
+        proc = run(["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new",
+                    "git@github.com"], check=False)
+        out = proc.stdout + proc.stderr
+        if "successfully authenticated" in out:
+            success("SSH authentication to GitHub works")
+        else:
+            warn("SSH to GitHub not working yet — generate a key with "
+                 "`ssh-keygen -t ed25519` and add the .pub as a deploy key "
+                 "(with write access) on the repo, then test with: "
+                 "ssh -T git@github.com")
 
 
 def _backfill(cfg) -> None:
