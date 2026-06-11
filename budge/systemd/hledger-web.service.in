@@ -12,8 +12,9 @@ After=network-online.target
 Type=simple
 User=@USER@
 Environment=LC_ALL=C.UTF-8
+# --allow=view makes it read-only (flag replaced --capabilities in 1.26)
 ExecStart=@HLEDGER_WEB@ --serve --host=0.0.0.0 --port=5000 \
-    --capabilities=view -f @REPO@/main.journal
+    --allow=view -f @REPO@/main.journal
 Restart=on-failure
 SyslogIdentifier=hledger-web
 
