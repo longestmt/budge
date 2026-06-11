@@ -9,5 +9,6 @@ Description=budge: failure notification to OpenClaw for %i
 Type=oneshot
 User=@USER@
 Environment=BUDGE_CONFIG_DIR=@CONFIG_DIR@
+Environment=LC_ALL=C.UTF-8
 ExecStart=@BUDGE@ notify --unit %i
 SyslogIdentifier=budge-notify

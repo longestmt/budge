@@ -442,12 +442,17 @@ def _configure_ledger_file(cfg) -> None:
     With LEDGER_FILE set, the operator types `hledger register ...` from any
     directory — the journal location is configured once, at setup.
     """
-    line = f'export LEDGER_FILE="{cfg.repo / "main.journal"}"'
+    lines = [f'export LEDGER_FILE="{cfg.repo / "main.journal"}"']
+    if "UTF-8" not in (os.environ.get("LC_ALL")
+                       or os.environ.get("LANG") or ""):
+        # hledger needs a UTF-8 locale to read UTF-8 journals; minimal LXC
+        # consoles often have none configured.
+        lines.append('export LC_ALL="${LC_ALL:-C.UTF-8}"')
     rc = Path.home() / ".bashrc"
     existing = rc.read_text(encoding="utf-8") if rc.exists() else ""
-    if line in existing:
+    if all(l in existing for l in lines):
         return
-    if dry(f"set LEDGER_FILE in {rc}"):
+    if dry(f"set LEDGER_FILE (and locale if needed) in {rc}"):
         return
     cleaned = "\n".join(
         l for l in existing.splitlines()
@@ -456,7 +461,7 @@ def _configure_ledger_file(cfg) -> None:
     with open(rc, "w", encoding="utf-8") as f:
         f.write(cleaned.rstrip("\n")
                 + "\n\n# budge: hledger journal location (managed by "
-                  "budge setup)\n" + line + "\n")
+                  "budge setup)\n" + "\n".join(lines) + "\n")
     say(f"LEDGER_FILE set in {rc} — plain `hledger` commands work from "
         "anywhere (open a new shell or `source ~/.bashrc`)")
 

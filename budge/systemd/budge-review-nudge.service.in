@@ -7,5 +7,6 @@ After=budge-categorize.service
 Type=oneshot
 User=@USER@
 Environment=BUDGE_CONFIG_DIR=@CONFIG_DIR@
+Environment=LC_ALL=C.UTF-8
 ExecStart=@BUDGE@ notify --review-nudge
 SyslogIdentifier=budge-review-nudge

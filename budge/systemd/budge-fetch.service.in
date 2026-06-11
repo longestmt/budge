@@ -10,6 +10,7 @@ OnFailure=budge-notify@%n.service
 Type=oneshot
 User=@USER@
 Environment=BUDGE_CONFIG_DIR=@CONFIG_DIR@
+Environment=LC_ALL=C.UTF-8
 ExecStart=@BUDGE@ fetch
 # journald is the log infrastructure (PRD 7.6); no custom logging.
 SyslogIdentifier=budge-fetch

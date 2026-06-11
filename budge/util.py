@@ -82,7 +82,16 @@ def dry(action: str) -> bool:
 
 
 def run(cmd, cwd=None, input_text=None, check=True, env=None):
-    """Run a command, capturing output. Raises on failure when check=True."""
+    """Run a command, capturing output. Raises on failure when check=True.
+
+    Guarantees a UTF-8 locale for the child: GHC programs like hledger
+    refuse to decode UTF-8 journals under a C/POSIX locale (common on
+    minimal LXC consoles).
+    """
+    if env is None:
+        env = dict(os.environ)
+    if "UTF-8" not in (env.get("LC_ALL") or env.get("LANG") or ""):
+        env["LC_ALL"] = "C.UTF-8"
     proc = subprocess.run(
         cmd,
         cwd=str(cwd) if cwd else None,
