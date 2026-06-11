@@ -39,6 +39,11 @@ Hard rules:
 - Account names: lowercase, colon-separated, starting with `expenses:` or
   `income:` (e.g. expenses:groceries, income:salary). 8-20 expense categories.
 - Map each significant merchant (2+ transactions) to exactly one category.
+- Transfers between the household's own accounts — credit card payments,
+  account-to-account moves, loan payments to their own accounts — are NOT
+  spending and have already been removed from the data you receive. NEVER
+  propose categories like "transfers", "credit card payment", or "payments".
+  If a merchant still looks transfer-shaped, omit it entirely.
 
 Reply with ONLY a JSON object:
 {
@@ -124,16 +129,47 @@ def append_decision(repo: Path, mode: str, lines: list) -> None:
 
 # ------------------------------------------------------------ aggregates ---
 
+def _transfer_ids(repo: Path) -> set:
+    """Transaction ids the operator's own rules classify as transfers.
+
+    Transfers and card payments are money moves through assets:transfers,
+    never spending — they must not contaminate the budget analysis.
+    """
+    accounts = {a["slug"]: a for a in load_accounts(repo)}
+    by_slug = {}
+    for tid, (slug, row) in fetch.all_raw_rows(repo).items():
+        by_slug.setdefault(slug, []).append(row)
+    ids = set()
+    for slug, rows in by_slug.items():
+        acct = accounts.get(slug, {})
+        converted = fetch.convert_rows(repo, slug, rows)
+        for row in rows:
+            entry = converted.get(row["id"])
+            if entry and fetch.entry_category(
+                    entry, acct.get("account", "")) == journal.TRANSFERS:
+                ids.add(row["id"])
+    return ids
+
+
 def merchant_aggregates(repo: Path) -> dict:
-    """payee -> {count, total, monthly_avg} from the raw CSVs (spend < 0)."""
-    rows = fetch.all_raw_rows(repo).values()
-    dates = [r["date"] for _, r in rows] or [dt.date.today().isoformat()]
+    """payee -> {count, total, monthly_avg} from the raw CSVs (spend < 0).
+
+    Transfer-shaped transactions (per the rules files) are EXCLUDED — they
+    are not spending and would otherwise dwarf the real categories.
+    """
+    skip = _transfer_ids(repo)
+    rows = [r for tid, (_, r) in fetch.all_raw_rows(repo).items()
+            if tid not in skip]
+    if skip:
+        note(f"(excluded {len(skip)} transfer/card-payment transactions — "
+             "money moves between your own accounts, not spending)")
+    dates = [r["date"] for r in rows] or [dt.date.today().isoformat()]
     span_days = max(
         (dt.date.fromisoformat(max(dates))
          - dt.date.fromisoformat(min(dates))).days, 1)
     months = max(span_days / 30.44, 1.0)
     agg = {}
-    for _, row in rows:
+    for row in rows:
         amt = float(row["amount"])
         a = agg.setdefault(row["payee"], {"count": 0, "total": 0.0})
         a["count"] += 1
@@ -192,12 +228,23 @@ def bootstrap(cfg, household: dict) -> None:
                 break
             if action == "fewer":
                 limit = max(40, limit // 2)
-    categories = [
-        c["account"].strip() for c in parsed.get("categories", [])
-        if isinstance(c, dict)
-        and re.fullmatch(r"(expenses|income):[a-z0-9:_-]+",
-                         str(c.get("account", "")).strip())
-    ]
+    banned = re.compile(
+        r"transfer|credit.?card|cc.?payment|^expenses:payments?$", re.I)
+    categories, cat_notes = [], {}
+    for c in parsed.get("categories", []):
+        if not isinstance(c, dict):
+            continue
+        account = str(c.get("account", "")).strip()
+        if not re.fullmatch(r"(expenses|income):[a-z0-9:_-]+", account):
+            continue
+        if banned.search(account):
+            # money moves are never spending categories (PRD 7.3)
+            warn(f"dropped proposed category {account!r} — transfers and "
+                 "card payments go through assets:transfers, not the budget")
+            continue
+        categories.append(account)
+        if c.get("note"):
+            cat_notes[account] = str(c["note"])[:60]
     rules = [
         (str(r["payee"]).strip(), str(r["account"]).strip())
         for r in parsed.get("rules", [])
@@ -215,21 +262,28 @@ def bootstrap(cfg, household: dict) -> None:
     header("artifact 1 of 3 — proposed chart of accounts")
     proposal = "\n".join(sorted(set(categories)))
     while True:
-        say(proposal + "\n")
+        for line in proposal.splitlines():
+            account = line.split(";")[0].strip()
+            note_txt = cat_notes.get(account, "")
+            say(f"  {account:<32s}"
+                + (paint(f" ; {note_txt}", "dim") if note_txt else ""))
+        say("")
         act = prompt("[y] accept  [e] edit in $EDITOR  [n] skip", "y").lower()
         if act == "e":
             proposal = "\n".join(
-                l.strip() for l in edit_text(proposal).splitlines()
-                if l.strip())
+                l.split(";")[0].strip()
+                for l in edit_text(proposal).splitlines()
+                if l.split(";")[0].strip())
             continue
         break
     wrote_accounts = False
     if act != "n":
         for account in proposal.splitlines():
-            declare_account(repo, account)
+            declare_account(repo, account.split(";")[0].strip())
         wrote_accounts = True
         success("accounts.journal updated")
-    chart = proposal.splitlines() if act != "n" else sorted(set(categories))
+    chart = [l.split(";")[0].strip() for l in proposal.splitlines()] \
+        if act != "n" else sorted(set(categories))
 
     # ---- artifact (b): envelope amounts --------------------------------
     header("artifact 2 of 3 — monthly envelope amounts")
@@ -239,16 +293,32 @@ def bootstrap(cfg, household: dict) -> None:
         + paint(f"${ceiling:,.2f}/mo", "bold", "green"))
     observed = {c: 0.0 for c in chart if c.startswith("expenses:")}
     payee_cat = dict(rules)
+    members = {}   # category -> [(payee, monthly spend)] for transparency
     for payee, a in agg.items():
         cat = payee_cat.get(payee)
         if cat in observed and a["monthly_avg"] < 0:
             observed[cat] += -a["monthly_avg"]
+            members.setdefault(cat, []).append((payee, -a["monthly_avg"]))
+    mapped = sum(observed.values())
+    all_spend = sum(-a["monthly_avg"] for a in agg.values()
+                    if a["monthly_avg"] < 0)
+    if all_spend:
+        note(f"(merchant mapping covers ${mapped:,.2f} of ${all_spend:,.2f} "
+             "observed monthly spend; the rest lands in review)")
     envelopes = {}
     if confirm("Set envelope amounts now? (observed monthly actuals are the "
                "defaults; you type the targets)", default=True):
         while True:
             total = 0.0
             for cat in sorted(observed):
+                say("")
+                top = sorted(members.get(cat, []),
+                             key=lambda pm: -pm[1])[:5]
+                if top:
+                    extra = len(members.get(cat, [])) - len(top)
+                    note("  " + cat + " includes: "
+                         + ", ".join(f"{p} (~${m:,.0f}/mo)" for p, m in top)
+                         + (f", +{extra} more" if extra > 0 else ""))
                 default = f"{observed[cat]:.2f}"
                 value = prompt(f"  {cat} (observed ~${default})", default)
                 try:

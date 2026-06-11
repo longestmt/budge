@@ -30,10 +30,46 @@ def _backfill(env, simplefin_server):
         txn("w2", "2026-05-05", "-130.00", "KROGER"),
         txn("w3", "2026-05-12", "-5.00", "BLUE BOTTLE"),
         txn("w4", "2026-05-30", "3000.00", "ACME PAYROLL"),
+        txn("w5", "2026-05-15", "-2000.00", "ONLINE TRANSFER TO CARD"),
     ]
     simplefin_server.accounts = [
         checking_account(txns, consistent_balance(800.0, txns))]
     run_fetch(env.cfg, backfill_days=90, interactive=False)
+
+
+def test_transfers_excluded_from_wizard_analysis(env, simplefin_server):
+    """Money moves between own accounts must not look like spending."""
+    from budge.plan import merchant_aggregates
+    _backfill(env, simplefin_server)
+    agg = merchant_aggregates(env.repo)
+    assert "ONLINE TRANSFER TO CARD" not in agg
+    assert "KROGER" in agg
+
+
+def test_banned_transfer_categories_dropped(env, simplefin_server, fake_ai,
+                                            answers, capsys):
+    """AI-proposed 'credit card payment' / 'transfer' categories are vetoed."""
+    _backfill(env, simplefin_server)
+    bad = {"plan": {
+        "categories": PLAN_REPLY["plan"]["categories"] + [
+            {"account": "expenses:credit_card_payment", "note": "card pmts"},
+            {"account": "expenses:transfer", "note": "transfers"},
+        ],
+        "rules": PLAN_REPLY["plan"]["rules"],
+    }}
+    fake_ai.respond(bad)
+    answers.extend([
+        "6000", "1000", "goals",
+        "y",        # accept chart
+        "n",        # skip envelopes
+    ])  # rules step is skipped automatically when nothing to write changes
+    answers.extend(["n"])  # skip starter rules
+    run_plan(env.cfg, mode="bootstrap")
+    err = capsys.readouterr().err
+    assert "dropped proposed category" in err
+    accounts = (env.repo / "accounts.journal").read_text()
+    assert "credit_card_payment" not in accounts
+    assert "expenses:transfer" not in accounts
 
 
 def test_bootstrap_A13(env, simplefin_server, fake_ai, answers, capsys):
