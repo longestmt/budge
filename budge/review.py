@@ -18,7 +18,14 @@ from . import ailog, categorize, hledger, journal
 from .gitutil import commit_all, push
 from .scaffold import (add_vendor_rule, declare_account, load_accounts,
                        payee_pattern)
-from .util import confirm, die, dry, edit_text, prompt, say, warn
+from .util import (banner, confirm, die, dry, edit_text, header, paint,
+                   prompt, say, success, warn)
+
+_CONF_COLOR = {"high": "green", "medium": "yellow", "low": "red"}
+
+
+def _conf(c: str) -> str:
+    return paint(c, _CONF_COLOR.get(c, "dim")) if c else ""
 
 
 def _groups(entries: list) -> "OrderedDict":
@@ -187,7 +194,7 @@ def promote(cfg) -> bool:
             )
     commit_all(repo, f"budge promote: {len(entries)} reviewed transactions")
     push(repo)
-    say(f"promoted {len(entries)} transactions; committed and pushed")
+    success(f"promoted {len(entries)} transactions; committed and pushed")
     return True
 
 
@@ -205,10 +212,11 @@ def run_review(cfg, edit: bool = False) -> None:
         say("pending.journal updated")
         return
 
+    banner("weekly review — approve, correct, promote")
     _transfers_warning(repo)
     entries = journal.parse_pending(repo / "pending.journal")
     if not entries:
-        say("pending.journal is empty — nothing to review")
+        success("pending.journal is empty — nothing to review")
         return
 
     gaps = [e for e in entries if e.category == journal.TRANSFERS]
@@ -229,13 +237,16 @@ def run_review(cfg, edit: bool = False) -> None:
         payee = remaining[0]
         group = groups[payee]
         low = _lowest_confidence(group)
-        say(f"\n--- {payee} ---")
-        say(f"  {len(group)} txns, total {_amount_total(group)}, "
-            f"suggested {group[0].category}"
-            + (f", lowest confidence {low}" if low else ", no AI suggestion"))
+        header(payee)
+        say(f"  {len(group)} txns, total "
+            + paint(_amount_total(group), "bold")
+            + f", suggested {paint(group[0].category, 'bold', 'blue')}"
+            + (f", lowest confidence {_conf(low)}" if low
+               else ", no AI suggestion"))
         for e in group[:8]:
-            say(f"    {e.date}  {e.amount:>12}  {e.category}"
-                + (f"  ({e.confidence})" if e.confidence else ""))
+            say(f"    {e.date}  {paint(f'{e.amount:>12}', 'bold')}  "
+                f"{e.category}"
+                + (f"  ({_conf(e.confidence)})" if e.confidence else ""))
         if len(group) > 8:
             say(f"    ... and {len(group) - 8} more")
         action = prompt(
@@ -271,7 +282,8 @@ def run_review(cfg, edit: bool = False) -> None:
 
     entries = journal.parse_pending(repo / "pending.journal")
     if not entries:
-        say("\nnothing left pending")
+        say("")
+        success("nothing left pending")
         return
     unhandled = [p for p in _groups(entries) if p not in handled]
     if unhandled:

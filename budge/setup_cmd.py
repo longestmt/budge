@@ -21,14 +21,15 @@ from .fetch import run_fetch
 from .gitutil import commit_all, git
 from .scaffold import (declare_account, load_accounts, save_accounts,
                        scaffold, seed_account_rules)
-from .util import choose, confirm, die, dry, prompt, run, say, warn
+from .util import (banner, choose, confirm, die, dry, header, paint,
+                   prompt, run, say, success, warn)
 
 UNITS = ["budge-fetch", "budge-categorize", "budge-push",
          "budge-review-nudge", "budge-notify@"]
 
 
 def _check_prereqs(cfg) -> None:
-    say("— prerequisites —")
+    header("prerequisites")
     missing = []
     for tool, probe in [("hledger", [cfg.hledger_bin(), "--version"]),
                         ("git", ["git", "--version"])]:
@@ -68,8 +69,7 @@ def _collect_ai(cfg, ini) -> str:
     only — it is written to secrets.env, never to budge.conf)."""
     from . import ai as ai_mod
 
-    say("\n— AI provider (categorizes transactions you haven't made a "
-        "rule for) —")
+    header("AI provider — categorizes what your rules don't catch")
     presets = {
         "https://ollama.com/v1": "ollama-cloud",
         "https://api.openai.com/v1": "openai",
@@ -137,7 +137,7 @@ def _collect_ai(cfg, ini) -> str:
 
 
 def _collect_schedule(ini) -> None:
-    say("\n— sync frequency —")
+    header("sync frequency")
     stored = ini.get("schedule", "fetch", fallback="")
     by_fetch = {"*-*-* 06:00:00": "daily", "*-*-* 00/4:00:00": "4h",
                 "*-*-* *:00:00": "1h"}
@@ -184,7 +184,7 @@ def _collect_schedule(ini) -> None:
 
 def _collect_config(cfg):
     """Returns (Config, ai_api_key)."""
-    say("\n— configuration —")
+    header("configuration")
     config_dir().mkdir(parents=True, exist_ok=True)
     ini = configparser.ConfigParser()
     if conf_path().exists():
@@ -201,7 +201,7 @@ def _collect_config(cfg):
     ai_key = _collect_ai(cfg, ini)
     _collect_schedule(ini)
 
-    say("\n— notifications (optional) —")
+    header("notifications (optional)")
     say("budge can send failure alerts and the weekly “review ready” nudge\n"
         "to OpenClaw — or to anything that accepts a JSON POST (an ntfy\n"
         "topic, a Slack/Discord webhook, ...). Paste that webhook URL, or\n"
@@ -231,7 +231,7 @@ def _collect_config(cfg):
 
 
 def _collect_secrets(cfg, ai_key: str = "") -> Config:
-    say("\n— secrets (stored OUTSIDE the repo, chmod 600) —")
+    header("secrets — stored OUTSIDE the repo, chmod 600")
     secrets = dict(cfg.secrets)
 
     if secrets.get("SIMPLEFIN_ACCESS_URL"):
@@ -270,7 +270,7 @@ def _map_accounts(cfg) -> None:
     if not cfg.simplefin_access_url:
         warn("no SimpleFIN access URL; skipping account mapping")
         return
-    say("\n— account mapping —")
+    header("account mapping")
     import time
     data = simplefin.get_accounts(cfg.simplefin_access_url,
                                   start_date=int(time.time()))
@@ -330,7 +330,7 @@ def _backfill(cfg) -> None:
     if not cfg.simplefin_access_url or not load_accounts(repo):
         warn("backfill skipped (need SimpleFIN access + mapped accounts)")
         return
-    say("\n— 90-day backfill (opening balances + balance assertions) —")
+    header("90-day backfill — opening balances + balance assertions")
     run_fetch(cfg, backfill_days=90, interactive=True)
 
 
@@ -411,7 +411,7 @@ def _paisa(cfg) -> None:
 
 
 def run_setup(cfg) -> None:
-    say("budge setup — interactive bootstrap (safe to re-run)\n")
+    banner("setup — safe to re-run; Enter keeps any existing value")
     _check_prereqs(cfg)
     cfg, ai_key = _collect_config(cfg)
     cfg = _collect_secrets(cfg, ai_key)
@@ -436,8 +436,9 @@ def run_setup(cfg) -> None:
     else:
         say("skipped — run `budge plan` whenever you're ready")
 
+    header("what happens next")
     say(
-        "\n=== what happens next ===\n"
+        ""
         f"  every morning  budge-fetch pulls new transactions into "
         f"{cfg.repo / 'main.journal'}\n"
         "                 (rule-matched: cleared; the rest: pending via AI)\n"

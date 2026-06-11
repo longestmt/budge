@@ -21,8 +21,8 @@ from . import ai, categorize, fetch, hledger, journal
 from .gitutil import commit_all
 from .scaffold import (add_vendor_rule, declare_account, load_accounts,
                        payee_pattern)
-from .util import (append_file, confirm, die, edit_text, prompt, say, warn,
-                   write_file)
+from .util import (append_file, banner, confirm, die, edit_text, header,
+                   note, paint, prompt, say, success, warn, write_file)
 
 NEEDS_HINTS = ("housing", "rent", "mortgage", "utilities", "insurance",
                "debt", "childcare", "medical", "health")
@@ -84,7 +84,7 @@ def read_household(repo: Path) -> dict:
 def intake(repo: Path) -> dict:
     """Exactly three prompts (PRD 7.8), stored in household.md."""
     current = read_household(repo)
-    say("\n— Intake (three questions; answers live in household.md) —")
+    header("intake — three questions (answers live in household.md)")
     income = float(prompt(
         "1/3  Monthly take-home income",
         str(current["income"] or "")) or 0)
@@ -148,7 +148,8 @@ def merchant_aggregates(repo: Path) -> dict:
 
 def bootstrap(cfg, household: dict) -> None:
     repo = cfg.repo
-    say(f"\n{SAMPLE_BIAS_NOTE}")
+    say("")
+    note(SAMPLE_BIAS_NOTE)
     agg = merchant_aggregates(repo)
     if not agg:
         die("no transactions found — run the backfill first (budge setup)")
@@ -211,7 +212,7 @@ def bootstrap(cfg, household: dict) -> None:
         say("(using a generic starter chart — the AI pass returned nothing)")
 
     # ---- artifact (a): chart of accounts -------------------------------
-    say("\n— Proposed chart of accounts (artifact 1/3) —")
+    header("artifact 1 of 3 — proposed chart of accounts")
     proposal = "\n".join(sorted(set(categories)))
     while True:
         say(proposal + "\n")
@@ -227,14 +228,15 @@ def bootstrap(cfg, household: dict) -> None:
         for account in proposal.splitlines():
             declare_account(repo, account)
         wrote_accounts = True
-        say("accounts.journal updated")
+        success("accounts.journal updated")
     chart = proposal.splitlines() if act != "n" else sorted(set(categories))
 
     # ---- artifact (b): envelope amounts --------------------------------
-    say("\n— Envelope amounts (artifact 2/3) —")
+    header("artifact 2 of 3 — monthly envelope amounts")
     ceiling = household["income"] - household["savings"]
-    say(f"income ${household['income']:.2f} − savings target "
-        f"${household['savings']:.2f} = spending ceiling ${ceiling:.2f}/mo")
+    say(f"income ${household['income']:,.2f} − savings target "
+        f"${household['savings']:,.2f} = spending ceiling "
+        + paint(f"${ceiling:,.2f}/mo", "bold", "green"))
     observed = {c: 0.0 for c in chart if c.startswith("expenses:")}
     payee_cat = dict(rules)
     for payee, a in agg.items():
@@ -255,7 +257,11 @@ def bootstrap(cfg, household: dict) -> None:
                 except ValueError:
                     envelopes[cat] = observed[cat]
                 total += envelopes[cat]
-                say(f"    running total ${total:.2f} of ${ceiling:.2f}")
+                status = (paint(f"${total:,.2f}", "red", "bold")
+                          if total > ceiling
+                          else paint(f"${total:,.2f}", "green"))
+                say(f"    running total {status} of "
+                    f"${ceiling:,.2f}")
             extra = prompt("sinking fund for annual/seasonal irregulars "
                            "(monthly amount, blank to skip)", "")
             if extra.strip():
@@ -263,8 +269,9 @@ def bootstrap(cfg, household: dict) -> None:
                 declare_account(repo, "expenses:sinking-fund")
                 total += envelopes["expenses:sinking-fund"]
             if total <= ceiling:
-                say(f"targets total ${total:.2f} — within the ceiling "
-                    f"(${ceiling - total:.2f} unallocated)")
+                say(paint(f"targets total ${total:,.2f} — within the "
+                          f"ceiling (${ceiling - total:,.2f} unallocated)",
+                          "green", "bold"))
                 break
             # A14: surface the gap and slack candidates; never auto-resolve.
             gap = total - ceiling
@@ -272,8 +279,9 @@ def bootstrap(cfg, household: dict) -> None:
                 (c for c in envelopes
                  if not any(h in c for h in NEEDS_HINTS)),
                 key=lambda c: -envelopes[c])[:5]
-            say(f"\ntargets total ${total:.2f} — ${gap:.2f} OVER the "
-                f"ceiling.")
+            say("\n" + paint(f"targets total ${total:,.2f} — "
+                             f"${gap:,.2f} OVER the ceiling.",
+                             "red", "bold"))
             say("largest envelopes with discretionary slack: "
                 + ", ".join(f"{c} (${envelopes[c]:.2f})" for c in slack))
             say("budge won't pick the cuts — that's a household decision.")
@@ -284,7 +292,7 @@ def bootstrap(cfg, household: dict) -> None:
     wrote_budget = bool(envelopes)
 
     # ---- artifact (c): starter merchant rules --------------------------
-    say("\n— Starter merchant rules (artifact 3/3) —")
+    header("artifact 3 of 3 — starter merchant rules")
     rules = rules[:30]
     wrote_rules = 0
     if rules:
@@ -303,8 +311,8 @@ def bootstrap(cfg, household: dict) -> None:
                     add_vendor_rule(repo, slug, pattern, cat)
                 wrote_rules += 1
             result = categorize.regenerate(cfg)
-            say(f"rules absorbed {result['promoted_by_rule']} backfilled "
-                f"txns; {result['kept']} remain for review")
+            success(f"rules absorbed {result['promoted_by_rule']} backfilled "
+               f"txns; {result['kept']} remain for review")
 
     ok, output = hledger.check(repo / "main.journal")
     if not ok:
@@ -319,8 +327,10 @@ def bootstrap(cfg, household: dict) -> None:
         f"starter rules written: {wrote_rules}",
     ])
     commit_all(repo, "budge plan: bootstrap budget")
-    say("\nwizard done — view the budget with: "
-        "hledger -f main.journal balance --budget -M expenses")
+    say("")
+    success("wizard done — view the budget with: "
+       + paint("hledger -f main.journal balance --budget -M expenses",
+               "bold"))
 
 
 def _write_budget(cfg, envelopes: dict) -> None:
@@ -382,7 +392,7 @@ def reassess(cfg, months: int = 3) -> None:
     household = read_household(repo)
 
     # The operator-facing report IS hledger's own (stock interface):
-    say("\nhledger balance --budget over the trailing window:\n")
+    header("hledger balance --budget over the trailing window")
     proc = hledger.hledger([
         "balance", "-f", repo / "main.journal", "--budget", "-M",
         "expenses",
@@ -416,9 +426,13 @@ def reassess(cfg, months: int = 3) -> None:
             report.append(f"{cat}: over on average (${avg:.2f} vs "
                           f"${amount:.2f}), not a streak")
 
-    say("\n— variance —")
-    for line in report or ["all envelopes on track"]:
-        say("  " + line)
+    header("variance")
+    if not report:
+        success("all envelopes on track")
+    for line in report:
+        color = ("yellow" if "DORMANT" in line
+                 else "red" if "consecutive" in line else "dim")
+        say("  " + paint(line, color))
 
     # household.md context vs actuals (arithmetic only, stated plainly)
     spend_total = sum(sum(s) / len(s) for s in actuals.values() if s)
@@ -440,11 +454,19 @@ def reassess(cfg, months: int = 3) -> None:
     new_budget.update(proposals)
     old_text = (repo / "budget.journal").read_text(encoding="utf-8")
     _write_budget_text = _render_budget_text(cfg, new_budget)
-    diff = "".join(difflib.unified_diff(
+    diff_lines = list(difflib.unified_diff(
         old_text.splitlines(keepends=True),
         _write_budget_text.splitlines(keepends=True),
         "budget.journal (current)", "budget.journal (proposed)"))
-    say("\n— proposed budget.journal diff —\n" + diff)
+    header("proposed budget.journal diff")
+    for line in diff_lines:
+        line = line.rstrip("\n")
+        if line.startswith("+") and not line.startswith("+++"):
+            say(paint(line, "green"))
+        elif line.startswith("-") and not line.startswith("---"):
+            say(paint(line, "red"))
+        else:
+            say(paint(line, "dim"))
     decisions = [f"{c}: ${budget[c]:.2f} -> proposed ${v:.2f}"
                  for c, v in proposals.items()]
     if confirm("apply this diff?", default=False):
@@ -488,6 +510,8 @@ def run_plan(cfg, mode: str = None, months: int = 3,
              from_setup: bool = False) -> None:
     repo = cfg.repo
     has_budget = bool(read_budget(repo))
+    if not (from_setup and has_budget):
+        banner("budget planning wizard — your data, your decisions")
     if from_setup and has_budget:
         say("budget.journal already has envelopes — wizard skipped "
             "(run `budge plan` to re-assess)")  # acceptance A11

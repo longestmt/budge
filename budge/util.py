@@ -1,4 +1,4 @@
-"""Small shared helpers: subprocess, prompting, dry-run, $EDITOR."""
+"""Small shared helpers: subprocess, prompting, terminal styling, dry-run."""
 
 from __future__ import annotations
 
@@ -10,17 +10,66 @@ import tempfile
 # Global dry-run flag, set once by the CLI (--dry-run, acceptance A12).
 DRY_RUN = False
 
+# ---------------------------------------------------------------- colors ---
+
+_STYLES = {"bold": "1", "dim": "2", "red": "31", "green": "32",
+           "yellow": "33", "blue": "34", "magenta": "35", "cyan": "36"}
+
+
+def _isatty(stream) -> bool:
+    return (hasattr(stream, "isatty") and stream.isatty()
+            and not os.environ.get("NO_COLOR"))
+
+
+def paint(text: str, *styles: str, stream=None) -> str:
+    """ANSI-style text; plain when piped/redirected or NO_COLOR is set."""
+    if not _isatty(stream or sys.stdout):
+        return text
+    codes = ";".join(_STYLES[s] for s in styles if s in _STYLES)
+    return f"\033[{codes}m{text}\033[0m"
+
+
+BANNER = r"""
+ _               _
+| |__  _   _  __| | __ _  ___
+| '_ \| | | |/ _` |/ _` |/ _ \
+| |_) | |_| | (_| | (_| |  __/
+|_.__/ \__,_|\__,_|\__, |\___|
+                   |___/      """
+
+
+def banner(subtitle: str = "") -> None:
+    say(paint(BANNER, "cyan", "bold"))
+    if subtitle:
+        say(paint(f"   {subtitle}\n", "dim"))
+
+
+def header(title: str) -> None:
+    """A visually distinct section header."""
+    rule = "─" * max(4, 62 - len(title))
+    say("\n" + paint(f"── {title} {rule}", "magenta", "bold"))
+
+
+def success(msg: str) -> None:
+    say(paint("✓ ", "green", "bold") + msg)
+
+
+def note(msg: str) -> None:
+    say(paint(msg, "dim"))
+
 
 def say(msg: str) -> None:
     print(msg)
 
 
 def warn(msg: str) -> None:
-    print(f"warning: {msg}", file=sys.stderr)
+    print(paint("warning:", "yellow", "bold", stream=sys.stderr) + f" {msg}",
+          file=sys.stderr)
 
 
 def die(msg: str, code: int = 1) -> "None":
-    print(f"error: {msg}", file=sys.stderr)
+    print(paint("error:", "red", "bold", stream=sys.stderr) + f" {msg}",
+          file=sys.stderr)
     raise SystemExit(code)
 
 
@@ -52,9 +101,10 @@ def run(cmd, cwd=None, input_text=None, check=True, env=None):
 
 def prompt(question: str, default: str = "") -> str:
     """Prompt for a line of input; supports non-interactive scripted answers."""
-    suffix = f" [{default}]" if default else ""
+    suffix = paint(f" [{default}]", "dim") if default else ""
     try:
-        answer = input(f"{question}{suffix}: ").strip()
+        answer = input(paint(question, "cyan", "bold") + suffix
+                       + paint(": ", "cyan")).strip()
     except EOFError:
         answer = ""
     return answer or default
@@ -66,10 +116,10 @@ def choose(question: str, options: list, default: int = 0):
     The user answers with a number (or blank for the default); returns the
     chosen value.
     """
-    say(question)
+    say(paint(question, "cyan", "bold"))
     for i, (_, label) in enumerate(options, 1):
-        marker = "  (default)" if i - 1 == default else ""
-        say(f"  {i}) {label}{marker}")
+        marker = paint("  (default)", "green") if i - 1 == default else ""
+        say(f"  {paint(f'{i})', 'bold')} {label}{marker}")
     while True:
         answer = prompt("enter a number", str(default + 1)).strip()
         if answer.isdigit() and 1 <= int(answer) <= len(options):
@@ -81,9 +131,10 @@ def choose(question: str, options: list, default: int = 0):
 
 
 def confirm(question: str, default: bool = False) -> bool:
-    hint = "Y/n" if default else "y/N"
+    hint = paint("(Y/n)" if default else "(y/N)", "dim")
     try:
-        answer = input(f"{question} ({hint}): ").strip().lower()
+        answer = input(paint(question, "cyan", "bold")
+                       + f" {hint}: ").strip().lower()
     except EOFError:
         answer = ""
     if not answer:
