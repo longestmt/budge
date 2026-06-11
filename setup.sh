@@ -28,11 +28,13 @@ sudo -u "$REAL_USER" pipx ensurepath >/dev/null || true
 # everywhere without shell-config changes.
 REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
 ln -sf "$REAL_HOME/.local/bin/budge" /usr/local/bin/budge
-say "budge available globally at /usr/local/bin/budge"
+say "budge available globally at /usr/local/bin/budge (pipx's PATH note above is handled by this symlink)"
 
 say "installing the budge man page"
 install -D -m 0644 "$SCRIPT_DIR/budge.1" /usr/local/share/man/man1/budge.1
-command -v mandb >/dev/null && mandb -q || true
+# LC_ALL set explicitly: minimal LXC images often have no locale configured,
+# which makes mandb grumble.
+command -v mandb >/dev/null && LC_ALL=C.UTF-8 mandb -q 2>/dev/null || true
 
 say "prerequisites done — starting interactive setup as ${REAL_USER}"
 # The interactive phase is idempotent and never needs root except for the
