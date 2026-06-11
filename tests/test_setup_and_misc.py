@@ -114,9 +114,24 @@ def test_ui_command_updates_choice(env, answers, capsys):
     run_ui(Config())
     assert Config().ui_enabled == {"hledger-ui"}
     assert not (env.repo / "paisa.yaml").exists()   # paisa not configured
+    out = capsys.readouterr().out
+    assert "UI status" in out        # the unmissable summary block
+    assert "hledger-ui" in out
     run_ui(Config(), show_only=True)
     out = capsys.readouterr().out
     assert "[x]" in out and "hledger-ui" in out
+
+
+def test_ui_status_flags_missing_tools(env, capsys):
+    from budge.config import Config
+    from budge.setup_cmd import _ui_status
+    (env.confdir / "budge.conf").write_text(
+        (env.confdir / "budge.conf").read_text()
+        + "[ui]\nenabled = hledger-web, hledger-textual\n")
+    _ui_status(Config())
+    out = capsys.readouterr().out
+    # neither tool exists in the sandbox: both lines demand action
+    assert out.count("ACTION NEEDED") == 2
 
 
 def test_paisa_skipped_when_not_chosen(env):

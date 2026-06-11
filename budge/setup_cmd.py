@@ -39,6 +39,18 @@ UNITS = ["budge-fetch", "budge-categorize", "budge-push",
          "budge-review-nudge", "budge-notify@"]
 
 
+def _hledger_version(cfg) -> tuple:
+    import re as _re
+    try:
+        out = run([cfg.hledger_bin(), "--version"]).stdout
+        m = _re.search(r"hledger (\d+)\.(\d+)", out)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    except Exception:
+        pass
+    return (0, 0)
+
+
 def _check_prereqs(cfg) -> None:
     header("prerequisites")
     missing = []
@@ -49,6 +61,14 @@ def _check_prereqs(cfg) -> None:
             say(f"  {out}")
         except Exception:
             missing.append(tool)
+    version = _hledger_version(cfg)
+    if (1, 25) <= version < (1, 40):
+        say(paint(
+            "  advisory: this hledger works with budge, but the wider "
+            "ecosystem\n  (hledger-textual and friends) expects >= 1.40. "
+            "Debian's package lags;\n  official binaries from "
+            "https://hledger.org/install belong in /usr/local/bin.",
+            "yellow"))
     if missing:
         die(f"missing: {', '.join(missing)} — run setup.sh (as root) first, "
             "or install them via apt")
@@ -455,10 +475,6 @@ def _install_units(cfg, rendered: Path) -> None:
         _toggle_service(
             "hledger-web.service", "hledger-web" in ui
             and bool(shutil.which("hledger-web")))
-        if "hledger-web" in ui and not shutil.which("hledger-web"):
-            warn("hledger-web selected but not installed — "
-                 "apt install hledger-web, then re-run "
-                 "`budge setup --services-only`")
     else:
         say(
             "\nTo install the timers + chosen UIs (needs root):\n"
@@ -484,41 +500,73 @@ def _toggle_service(unit: str, wanted: bool) -> None:
         run(["systemctl", "disable", "--now", unit], check=False)
 
 
+def _apt_install(package: str) -> None:
+    """Best-effort install of a missing UI tool (root + apt only)."""
+    if os.geteuid() != 0 or not shutil.which("apt-get"):
+        return
+    if dry(f"apt-get install {package}"):
+        return
+    say(f"installing {package}...")
+    run(["apt-get", "install", "-y", "-qq", package], check=False)
+
+
 def _ui_extras(cfg) -> None:
-    """Non-service UIs: install/hint per the operator's choices."""
+    """Install whatever the operator chose, where budge can do it itself."""
     ui = cfg.ui_enabled
+    if "hledger-ui" in ui and not shutil.which("hledger-ui"):
+        _apt_install("hledger-ui")
+    if "hledger-web" in ui and not shutil.which("hledger-web"):
+        _apt_install("hledger-web")
+    if "hledger-textual" in ui and not shutil.which("hledger-textual") \
+            and shutil.which("pipx") and not dry("pipx install "
+                                                 "hledger-textual"):
+        say("installing hledger-textual via pipx...")
+        run(["pipx", "install", "hledger-textual"], check=False)
+
+
+def _ui_status(cfg) -> None:
+    """One unmissable block: each chosen UI, ready or what to do about it."""
+    ui = cfg.ui_enabled
+    if not ui:
+        return
+    header("UI status")
+    rows = []
+    if "paisa" in ui:
+        runtime = shutil.which("podman") or shutil.which("docker")
+        rows.append(("paisa", bool(runtime),
+                     "http://<this-host>:7500  (no auth — keep LAN-only)",
+                     "install podman, then re-run `budge ui`"))
+    if "hledger-web" in ui:
+        rows.append(("hledger-web", bool(shutil.which("hledger-web")),
+                     "http://<this-host>:5000  (view-only, no auth)",
+                     "apt install hledger-web && budge ui"))
     if "hledger-ui" in ui:
-        if shutil.which("hledger-ui"):
-            say("hledger-ui: run `hledger-ui` in any terminal "
-                "(LEDGER_FILE is configured)")
-        else:
-            warn("hledger-ui selected but not installed — "
-                 "apt install hledger-ui")
+        rows.append(("hledger-ui", bool(shutil.which("hledger-ui")),
+                     "run: hledger-ui", "apt install hledger-ui && budge ui"))
     if "hledger-textual" in ui:
-        # hledger-textual passes --no-conf, which needs hledger >= 1.40
-        try:
-            import re as _re
-            v = run([cfg.hledger_bin(), "--version"]).stdout
-            m = _re.search(r"hledger (\d+)\.(\d+)", v)
-            if m and (int(m.group(1)), int(m.group(2))) < (1, 40):
-                warn(f"hledger-textual needs hledger >= 1.40 (you have "
-                     f"{m.group(0)}). Install the official binary from "
-                     "https://github.com/simonmichael/hledger/releases "
-                     "into /usr/local/bin first.")
-        except Exception:
-            pass
-        if not shutil.which("hledger-textual") and shutil.which("pipx"):
-            if not dry("pipx install hledger-textual"):
-                run(["pipx", "install", "hledger-textual"], check=False)
-        if shutil.which("hledger-textual"):
-            say("hledger-textual: run `hledger-textual` in any terminal")
+        ok_bin = bool(shutil.which("hledger-textual"))
+        ok_ver = _hledger_version(cfg) >= (1, 40)
+        if ok_bin and ok_ver:
+            rows.append(("hledger-textual", True,
+                         "run: hledger-textual  "
+                         "(edits txns — NEVER pending.journal, it's "
+                         "derived; use budge review)", ""))
+        elif not ok_ver:
+            rows.append(("hledger-textual", False, "",
+                         "needs hledger >= 1.40 — official binaries from "
+                         "https://hledger.org/install into /usr/local/bin, "
+                         "then `budge ui`"))
         else:
-            warn("hledger-textual not installed — try: "
-                 "pipx install hledger-textual")
-        warn("hledger-textual can EDIT/DELETE transactions. Editing "
-             "main.journal that way is legitimate hledger usage, but NEVER "
-             "edit pending.journal with it — that file is derived and "
-             "regeneration will discard such edits (use `budge review`)")
+            rows.append(("hledger-textual", False, "",
+                         "pipx install hledger-textual && budge ui"))
+    for name, ready, how, fix in rows:
+        if ready:
+            say("  " + paint("✓", "green", "bold")
+                + f" {name:<17s}" + how)
+        else:
+            say("  " + paint("✗", "red", "bold")
+                + f" {name:<17s}"
+                + paint("ACTION NEEDED: ", "red", "bold") + fix)
 
 
 def _paisa(cfg) -> None:
@@ -608,12 +656,11 @@ def run_ui(cfg, show_only: bool = False) -> None:
         with open(conf_path(), "w", encoding="utf-8") as f:
             ini.write(f)
     cfg = Config()  # reload with the new choices
+    _ui_extras(cfg)
     rendered = _render_units(cfg)
     _paisa(cfg)
     _install_units(cfg, rendered)
-    _ui_extras(cfg)
-    if chosen == current:
-        say("(no changes)")
+    _ui_status(cfg)
 
 
 def run_setup(cfg, services_only: bool = False) -> None:
@@ -622,10 +669,11 @@ def run_setup(cfg, services_only: bool = False) -> None:
         # existing configuration — no prompts, no wizard, no data changes.
         banner("setup --services-only — timers + dashboard from existing "
                "config")
+        _ui_extras(cfg)
         rendered = _render_units(cfg)
         _paisa(cfg)
         _install_units(cfg, rendered)
-        _ui_extras(cfg)
+        _ui_status(cfg)
         _configure_ledger_file(cfg)
         return
     banner("setup — safe to re-run; Enter keeps any existing value")
@@ -636,10 +684,11 @@ def run_setup(cfg, services_only: bool = False) -> None:
     _map_accounts(cfg)
     _github_remote(cfg)
     _backfill(cfg)
+    _ui_extras(cfg)
     rendered = _render_units(cfg)
     _paisa(cfg)
     _install_units(cfg, rendered)
-    _ui_extras(cfg)
+    _ui_status(cfg)
     _configure_ledger_file(cfg)
     commit_all(cfg.repo, "budge setup: configuration artifacts")
 
