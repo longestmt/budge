@@ -14,7 +14,7 @@ import tempfile
 from collections import OrderedDict
 from pathlib import Path
 
-from . import ailog, categorize, hledger, journal
+from . import ailog, categorize, fetch, hledger, journal
 from .gitutil import commit_all, push
 from .scaffold import (add_vendor_rule, declare_account, load_accounts,
                        payee_pattern)
@@ -225,6 +225,7 @@ def run_review(cfg, edit: bool = False) -> None:
              "approve them and consider a rules pattern: "
              + ", ".join(sorted({e.payee for e in gaps})[:5]))
 
+    raw_rows = fetch.all_raw_rows(repo)
     handled = set()
     while True:
         entries = journal.parse_pending(repo / "pending.journal")
@@ -237,16 +238,20 @@ def run_review(cfg, edit: bool = False) -> None:
         payee = remaining[0]
         group = groups[payee]
         low = _lowest_confidence(group)
-        header(payee)
+        header(f"vendor: {payee}")
         say(f"  {len(group)} txns, total "
             + paint(_amount_total(group), "bold")
             + f", suggested {paint(group[0].category, 'bold', 'blue')}"
             + (f", lowest confidence {_conf(low)}" if low
-               else ", no AI suggestion"))
+               else " — some txns have no AI suggestion yet"))
         for e in group[:8]:
-            say(f"    {e.date}  {paint(f'{e.amount:>12}', 'bold')}  "
-                f"{e.category}"
-                + (f"  ({_conf(e.confidence)})" if e.confidence else ""))
+            memo = raw_rows.get(e.sf_id, ("", {}))[1].get("memo", "")
+            detail = (paint(f"  {memo[:44]}", "dim") if memo
+                      else (f"  {e.category}"
+                            if e.category != group[0].category else ""))
+            say(f"    {e.date}  {paint(f'{e.amount:>12}', 'bold')}"
+                + (f"  ({_conf(e.confidence)})" if e.confidence else "")
+                + detail)
         if len(group) > 8:
             say(f"    ... and {len(group) - 8} more")
         action = prompt(
