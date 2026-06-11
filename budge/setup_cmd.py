@@ -427,6 +427,8 @@ def _render_units(cfg) -> Path:
     budge_bin = shutil.which("budge") or "/usr/local/bin/budge"
     subs = {
         "@BUDGE@": budge_bin,
+        "@HLEDGER_WEB@": shutil.which("hledger-web")
+        or "/usr/bin/hledger-web",
         "@USER@": os.environ.get("USER", "root"),
         "@REPO@": str(cfg.repo),
         "@CONFIG_DIR@": str(config_dir()),
@@ -524,22 +526,53 @@ def _ui_extras(cfg) -> None:
         run(["pipx", "install", "hledger-textual"], check=False)
 
 
+def _service_state(unit: str) -> str:
+    try:
+        return run(["systemctl", "is-active", unit],
+                   check=False).stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"  # no systemd here (e.g. tests)
+
+
+def _host_address() -> str:
+    try:
+        addrs = run(["hostname", "-I"], check=False).stdout.split()
+        if addrs:
+            return addrs[0]
+    except Exception:
+        pass
+    return "<this-host>"
+
+
 def _ui_status(cfg) -> None:
-    """One unmissable block: each chosen UI, ready or what to do about it."""
+    """One unmissable block: each chosen UI, VERIFIED ready or what to do."""
     ui = cfg.ui_enabled
     if not ui:
         return
     header("UI status")
+    host = _host_address()
     rows = []
+
+    def service_row(name, unit, port, extra, install_fix):
+        binary_ok = (bool(shutil.which("podman") or shutil.which("docker"))
+                     if name == "paisa"
+                     else bool(shutil.which(name)))
+        if not binary_ok:
+            return (name, False, "", install_fix)
+        state = _service_state(unit)
+        if state in ("active", "unknown"):
+            return (name, True, f"http://{host}:{port}  {extra}", "")
+        return (name, False, "",
+                f"service is {state} — check: journalctl -u {unit} -n 20")
+
     if "paisa" in ui:
-        runtime = shutil.which("podman") or shutil.which("docker")
-        rows.append(("paisa", bool(runtime),
-                     "http://<this-host>:7500  (no auth — keep LAN-only)",
-                     "install podman, then re-run `budge ui`"))
+        rows.append(service_row(
+            "paisa", "paisa.service", 7500, "(no auth — keep LAN-only)",
+            "install podman, then re-run `budge ui`"))
     if "hledger-web" in ui:
-        rows.append(("hledger-web", bool(shutil.which("hledger-web")),
-                     "http://<this-host>:5000  (view-only, no auth)",
-                     "apt install hledger-web && budge ui"))
+        rows.append(service_row(
+            "hledger-web", "hledger-web.service", 5000,
+            "(view-only, no auth)", "apt install hledger-web && budge ui"))
     if "hledger-ui" in ui:
         rows.append(("hledger-ui", bool(shutil.which("hledger-ui")),
                      "run: hledger-ui", "apt install hledger-ui && budge ui"))
