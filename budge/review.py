@@ -295,6 +295,7 @@ def run_review(cfg, edit: bool = False) -> None:
         action = prompt(
             "[a]pprove  [v]endor rule  [s]ingle txn  [k]skip  [q]uit",
             "a").lower()
+        action = action[:1]  # accept full words like "single" or "vendor"
         if action == "q":
             break
         if action == "k":
@@ -310,17 +311,24 @@ def run_review(cfg, edit: bool = False) -> None:
                 handled.add(payee)
             continue
         if action == "s":
-            for i, e in enumerate(group):
-                say(f"  [{i}] {e.date} {e.amount:>12} {e.category}")
-            try:
-                idx = int(prompt("which", "0"))
-                target = group[idx]
-            except (ValueError, IndexError):
-                warn("no such transaction")
-                continue
+            if len(group) == 1:
+                target = group[0]
+            else:
+                say("select the transaction to recategorize:")
+                for i, e in enumerate(group):
+                    say(f"  [{i}] {e.date} {e.amount:>12} {e.category}")
+                try:
+                    idx = int(prompt("transaction number", "0"))
+                    target = group[idx]
+                except (ValueError, IndexError):
+                    warn("no such transaction")
+                    continue
+            say(f"recategorizing one transaction: {target.date} "
+                f"{target.amount:>12} {target.payee}")
             cat = _prompt_category(repo, target.category)
             if cat:
                 correct_single(cfg, target, cat)
+                success(f"updated transaction to {cat}")
             continue
 
     entries = journal.parse_pending(repo / "pending.journal")

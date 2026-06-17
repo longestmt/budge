@@ -46,3 +46,33 @@ def test_review_session_approve_correct_promote(env, simplefin_server,
     assert "expenses:coffee" in main and "* SAFEWAY" in main
     rules = (env.repo / "import/rules/checking.rules").read_text()
     assert "BLUE\\ BOTTLE" in rules
+
+
+def test_review_single_transaction_accepts_full_word_and_prompts_category(
+        env, simplefin_server, fake_ai, answers, capsys):
+    txns = [txn("i1", "2026-05-03", "-4.50", "BLUE BOTTLE")]
+    simplefin_server.accounts = [
+        checking_account(txns, consistent_balance(400.0, txns))]
+    run_fetch(env.cfg, backfill_days=90, interactive=False)
+    for cat in ("expenses:dining", "expenses:coffee"):
+        declare_account(env.repo, cat)
+    fake_ai.respond({"map": {
+        "BLUE BOTTLE": {"category": "expenses:dining",
+                        "confidence": "medium"},
+    }})
+    run_categorize(env.cfg)
+
+    answers.extend([
+        "single",              # full word should behave like "s"
+        "3",                   # choose expenses:coffee from category list
+        "a",                   # approve the now-corrected group
+        "n",                   # don't promote in this test
+    ])
+    run_review(env.cfg)
+
+    out = capsys.readouterr().out
+    assert "recategorizing one transaction" in out
+    assert "choose a category" in out
+    pending = journal.parse_pending(env.repo / "pending.journal")
+    assert pending[0].category == "expenses:coffee"
+    assert pending[0].origin == "manual"
