@@ -48,7 +48,7 @@ def test_review_session_approve_correct_promote(env, simplefin_server,
     assert "BLUE\\ BOTTLE" in rules
 
 
-def test_review_single_transaction_accepts_full_word_and_prompts_category(
+def test_review_single_transaction_prompts_for_category(
         env, simplefin_server, fake_ai, answers, capsys):
     txns = [txn("i1", "2026-05-03", "-4.50", "BLUE BOTTLE")]
     simplefin_server.accounts = [
@@ -63,7 +63,7 @@ def test_review_single_transaction_accepts_full_word_and_prompts_category(
     run_categorize(env.cfg)
 
     answers.extend([
-        "single",              # full word should behave like "s"
+        "s",                   # recategorize a single transaction
         "3",                   # choose expenses:coffee from category list
         "a",                   # approve the now-corrected group
         "n",                   # don't promote in this test
@@ -72,6 +72,7 @@ def test_review_single_transaction_accepts_full_word_and_prompts_category(
 
     out = capsys.readouterr().out
     assert "recategorizing one transaction" in out
+    assert "choose the new category for this transaction" in out
     assert "choose a category" in out
     pending = journal.parse_pending(env.repo / "pending.journal")
     assert pending[0].category == "expenses:coffee"

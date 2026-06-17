@@ -315,16 +315,17 @@ def run_review(cfg, edit: bool = False) -> None:
                 target = group[0]
             else:
                 say("select the transaction to recategorize:")
-                for i, e in enumerate(group):
-                    say(f"  [{i}] {e.date} {e.amount:>12} {e.category}")
+                for i, e in enumerate(group, 1):
+                    say(f"  {i}) {e.date} {e.amount:>12} {e.category}")
                 try:
-                    idx = int(prompt("transaction number", "0"))
+                    idx = int(prompt("transaction number", "1")) - 1
                     target = group[idx]
                 except (ValueError, IndexError):
                     warn("no such transaction")
                     continue
             say(f"recategorizing one transaction: {target.date} "
                 f"{target.amount:>12} {target.payee}")
+            say("choose the new category for this transaction:")
             cat = _prompt_category(repo, target.category)
             if cat:
                 correct_single(cfg, target, cat)
