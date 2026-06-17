@@ -6,7 +6,8 @@ from budge import ailog, hledger, journal
 from budge.categorize import run_categorize
 from budge.fetch import run_fetch
 from budge.gitutil import head_commit
-from budge.review import correct_single, correct_vendor, promote
+from budge.review import (_category_options, _prompt_category, correct_single,
+                          correct_vendor, promote)
 from budge.scaffold import declare_account
 
 from conftest import checking_account, consistent_balance, txn
@@ -124,6 +125,23 @@ def test_manual_override_survives_regeneration(env, simplefin_server,
 
 def test_promote_empty_pending_noop(env):
     assert promote(env.cfg) is False
+
+
+def test_prompt_category_can_select_existing_by_number(env, answers):
+    declare_account(env.repo, "expenses:coffee")
+    idx = _category_options(env.repo).index("expenses:coffee") + 1
+
+    answers.append(str(idx))
+
+    assert _prompt_category(env.repo) == "expenses:coffee"
+
+
+def test_prompt_category_can_add_new_category(env, answers):
+    answers.extend(["n", "expenses:parking", "y"])
+
+    assert _prompt_category(env.repo) == "expenses:parking"
+    accounts = (env.repo / "accounts.journal").read_text()
+    assert "account expenses:parking" in accounts
 
 
 def test_dry_run_correction_and_promote_A12(env, simplefin_server, fake_ai):

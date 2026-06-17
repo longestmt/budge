@@ -74,21 +74,57 @@ def _transfers_warning(repo: Path) -> None:
         )
 
 
+def _category_options(repo: Path, default: str = "") -> list[str]:
+    """Categories shown in review prompts, with the default near the top."""
+    def visible(cat: str) -> bool:
+        return (cat == journal.TRANSFERS
+                or cat.split(":")[0] in ("expenses", "income", "liabilities"))
+
+    cats = sorted(
+        c for c in categorize.allowed_categories(repo)
+        if c != journal.UNCATEGORIZED and visible(c)
+    )
+    if default:
+        if default in cats:
+            cats.remove(default)
+        cats.insert(0, default)
+    return cats
+
+
 def _prompt_category(repo: Path, default: str = "") -> str:
-    cats = sorted(categorize.allowed_categories(repo))
+    all_cats = categorize.allowed_categories(repo) - {journal.UNCATEGORIZED}
+    cats = _category_options(repo, default)
+    say("choose a category:")
+    for i, cat in enumerate(cats, 1):
+        marker = " (current)" if cat == default else ""
+        say(f"  {i}) {cat}{marker}")
+    say("  n) add a new category")
     while True:
-        cat = prompt("category", default).strip()
-        if not cat:
+        answer = prompt("category number/name (or n)", "1" if cats else "n")
+        choice = answer.strip()
+        if not choice:
             return ""
-        if cat in cats:
-            return cat
-        if confirm(f"{cat!r} is not declared in accounts.journal — "
+        if choice.isdigit() and 1 <= int(choice) <= len(cats):
+            return cats[int(choice) - 1]
+        if choice.lower() in ("n", "new", "+"):
+            cat = prompt("new category").strip()
+            if not cat:
+                return ""
+            if cat in all_cats:
+                return cat
+            if confirm(f"declare {cat!r} in accounts.journal and use it?"):
+                declare_account(repo, cat)
+                return cat
+            continue
+        # Backward-compatible escape hatch for scripted use / power users: an
+        # exact category name still works, and an undeclared name can be added.
+        if choice in all_cats:
+            return choice
+        if confirm(f"{choice!r} is not declared in accounts.journal — "
                    f"declare it and use it?"):
-            declare_account(repo, cat)
-            return cat
-        say("known categories: " + ", ".join(
-            c for c in cats if c.startswith("expenses") or
-            c.startswith("income")))
+            declare_account(repo, choice)
+            return choice
+        say("enter a listed number, an existing category name, or 'n'")
 
 
 def correct_vendor(cfg, payee: str, entries: list, category: str) -> None:
