@@ -68,7 +68,7 @@ Banks → SimpleFIN Bridge → budge fetch (immutable raw CSVs, committed)
             ▼                       │
    weekly  budge review ──corrections──▶ rules files
             │
-        promote: hledger check ⇒ flip ! to * ⇒ append to main.journal
+        promote: hledger check ⇒ flip ! to * ⇒ insert at main transaction marker
                  ⇒ clear pending ⇒ one commit ⇒ push
             │
             ▼

@@ -1,5 +1,7 @@
 """Review & promote tests: acceptance A7, A8; outcome logging; overrides."""
 
+import datetime as dt
+
 import pytest
 
 from budge import ailog, hledger, journal
@@ -8,7 +10,7 @@ from budge.fetch import run_fetch
 from budge.gitutil import head_commit
 from budge.review import (_category_options, _prompt_category, correct_single,
                           correct_vendor, promote)
-from budge.scaffold import declare_account
+from budge.scaffold import MAIN_TRANSACTION_MARKER, declare_account
 
 from conftest import checking_account, consistent_balance, txn
 
@@ -33,6 +35,15 @@ def _seed(env, simplefin_server, fake_ai):
     run_categorize(env.cfg)
 
 
+def _repo_files(repo):
+    """Snapshot non-git files so failed promotion tests catch every write."""
+    return {
+        path.relative_to(repo): path.read_bytes()
+        for path in repo.rglob("*")
+        if path.is_file() and ".git" not in path.parts
+    }
+
+
 def test_vendor_correction_A7(env, simplefin_server, fake_ai):
     _seed(env, simplefin_server, fake_ai)
     pend = journal.parse_pending(env.repo / "pending.journal")
@@ -54,7 +65,7 @@ def test_vendor_correction_A7(env, simplefin_server, fake_ai):
     assert ok, out
 
     # ...and the vendor never re-enters pending on the next fetch
-    new = txn("r9", "2026-06-08", "-5.75", "BLUE BOTTLE")
+    new = txn("r9", dt.date.today().isoformat(), "-5.75", "BLUE BOTTLE")
     txns = simplefin_server.accounts[0]["transactions"] + [new]
     simplefin_server.accounts = [
         checking_account(txns, consistent_balance(400.0, txns))]
@@ -93,7 +104,8 @@ def test_promote_flips_and_logs_outcomes(env, simplefin_server, fake_ai):
     assert promote(env.cfg)
 
     # pending truncated; entries now cleared (*) in main.journal
-    assert not journal.parse_pending(env.repo / "pending.journal")
+    assert (env.repo / "pending.journal").read_text(encoding="utf-8") \
+        == journal.PENDING_HEADER
     main = (env.repo / "main.journal").read_text()
     assert "* BLUE BOTTLE" in main
     ok, out = hledger.check(env.repo / "main.journal")
@@ -104,6 +116,127 @@ def test_promote_flips_and_logs_outcomes(env, simplefin_server, fake_ai):
     assert outcomes["r1"]["result"] == "accepted"
     assert outcomes["r4"]["result"] == "overridden"  # AI said groceries
     assert outcomes["r4"]["final"] == "expenses:dining"
+
+
+def test_promote_preserves_pending_order_before_balance_assertion(env):
+    """Clearing a pending txn must not move it behind a later assertion."""
+    declare_account(env.repo, "income:contributions")
+    pending = journal.Pending(
+        date="2026-07-14",
+        payee="PLAN CONTRIBUTION",
+        sf_id="order-1",
+        source_account="assets:checking",
+        amount="$120.08",
+        category="income:contributions",
+        origin="ai",
+        suggested="income:contributions",
+    )
+    journal.write_pending(env.repo / "pending.journal", [pending])
+    assertion = (
+        "2026-07-14 * balance assertion (simplefin)\n"
+        "    assets:checking                           $0 = $120.08\n"
+    )
+    main_path = env.repo / "main.journal"
+    main_path.write_text(main_path.read_text(encoding="utf-8")
+                         + "\n" + assertion, encoding="utf-8")
+
+    ok, output = hledger.check(main_path)
+    assert ok, output
+    assert promote(env.cfg)
+
+    assert (env.repo / "pending.journal").read_text(encoding="utf-8") \
+        == journal.PENDING_HEADER
+    main = main_path.read_text(encoding="utf-8")
+    assert (main.index(MAIN_TRANSACTION_MARKER)
+            < main.index("2026-07-14 * PLAN CONTRIBUTION")
+            < main.index("2026-07-14 * balance assertion"))
+    ok, output = hledger.check(main_path)
+    assert ok, output
+
+
+@pytest.mark.parametrize("marker_count", [0, 2])
+def test_promote_requires_exactly_one_transaction_marker(
+        env, simplefin_server, fake_ai, marker_count, capsys):
+    _seed(env, simplefin_server, fake_ai)
+    main_path = env.repo / "main.journal"
+    main = main_path.read_text(encoding="utf-8")
+    if marker_count == 0:
+        main = main.replace(MAIN_TRANSACTION_MARKER,
+                            "; operator transaction section")
+    else:
+        main += "\n" + MAIN_TRANSACTION_MARKER + "\n"
+    main_path.write_text(main, encoding="utf-8")
+    files_before = _repo_files(env.repo)
+    head_before = head_commit(env.repo)
+
+    with pytest.raises(SystemExit):
+        promote(env.cfg)
+
+    error = capsys.readouterr().err
+    assert ("missing" if marker_count == 0 else "ambiguous") in error
+    assert "expected exactly one line" in error
+    assert _repo_files(env.repo) == files_before
+    assert head_commit(env.repo) == head_before
+
+
+def test_promote_rehearsal_failure_modifies_no_real_files(
+        env, simplefin_server, fake_ai, monkeypatch):
+    _seed(env, simplefin_server, fake_ai)
+    files_before = _repo_files(env.repo)
+    head_before = head_commit(env.repo)
+    real_check = hledger.check
+    calls = 0
+
+    def fail_second_check(path, extra_checks=None):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            return False, "rehearsed books do not balance"
+        return real_check(path, extra_checks)
+
+    monkeypatch.setattr(hledger, "check", fail_second_check)
+    with pytest.raises(SystemExit):
+        promote(env.cfg)
+
+    assert calls == 2
+    assert _repo_files(env.repo) == files_before
+    assert head_commit(env.repo) == head_before
+
+
+def test_multiple_promotions_preserve_batch_order(env):
+    declare_account(env.repo, "expenses:test")
+
+    def pending(tid, payee):
+        return journal.Pending(
+            date="2026-07-14",
+            payee=payee,
+            sf_id=tid,
+            source_account="assets:transfers",
+            amount="$-1.00",
+            category="expenses:test",
+            origin="manual",
+        )
+
+    journal.write_pending(env.repo / "pending.journal", [
+        pending("batch-1a", "FIRST A"),
+        pending("batch-1b", "FIRST B"),
+    ])
+    assert promote(env.cfg)
+    journal.write_pending(env.repo / "pending.journal", [
+        pending("batch-2", "SECOND"),
+    ])
+    assert promote(env.cfg)
+
+    main = (env.repo / "main.journal").read_text(encoding="utf-8")
+    assert (main.index(MAIN_TRANSACTION_MARKER)
+            < main.index("; simplefin_id: batch-2")
+            < main.index("; simplefin_id: batch-1a")
+            < main.index("; simplefin_id: batch-1b"))
+    for tid in ("batch-1a", "batch-1b", "batch-2"):
+        assert main.count(f"; simplefin_id: {tid}") == 1
+    assert not journal.parse_pending(env.repo / "pending.journal")
+    ok, output = hledger.check(env.repo / "main.journal")
+    assert ok, output
 
 
 def test_manual_override_survives_regeneration(env, simplefin_server,

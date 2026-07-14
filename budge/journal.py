@@ -2,7 +2,7 @@
 
 pending.journal is written and parsed only by budge — it is regenerable from
 raw CSVs + rules + the AI decision log at any time. main.journal is hledger's
-domain; budge only ever appends hledger-formatted text to it.
+domain; budge writes hledger-formatted text only below its transaction marker.
 
 Pending entry format (status `!` per PRD section 4):
 

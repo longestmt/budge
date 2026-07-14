@@ -16,8 +16,8 @@ from pathlib import Path
 
 from . import ailog, categorize, fetch, hledger, journal
 from .gitutil import commit_all, push
-from .scaffold import (add_vendor_rule, declare_account, load_accounts,
-                       payee_pattern)
+from .scaffold import (MAIN_TRANSACTION_MARKER, add_vendor_rule,
+                       declare_account, load_accounts, payee_pattern)
 from .util import (banner, confirm, die, dry, edit_text, header, paint,
                    prompt, say, success, warn)
 
@@ -169,15 +169,59 @@ def correct_single(cfg, entry, category: str) -> None:
     journal.write_pending(repo / "pending.journal", entries)
 
 
+def _insert_promoted_entries(main_path: Path, entries: list[str]) -> None:
+    """Insert one promoted batch at main.journal's transaction boundary.
+
+    pending.journal is included above this boundary, so putting the cleared
+    forms immediately below it preserves their effective order relative to
+    every existing main-journal transaction and balance assertion.
+    """
+    text = Path(main_path).read_bytes().decode("utf-8")
+    lines = text.splitlines(keepends=True)
+    matches = [
+        i for i, line in enumerate(lines)
+        if line.rstrip("\r\n") == MAIN_TRANSACTION_MARKER
+    ]
+    if len(matches) != 1:
+        state = ("missing" if not matches
+                 else f"ambiguous ({len(matches)} copies)")
+        die(
+            "PROMOTE HALTED — main.journal transaction marker is "
+            f"{state}; expected exactly one line equal to\n"
+            f"{MAIN_TRANSACTION_MARKER}\n"
+            "Nothing was written, committed, or pushed."
+        )
+
+    # Match the journal's existing newline convention and leave a blank line
+    # around the inserted batch without otherwise rewriting its contents.
+    newline_match = re.search(r"\r\n|\n|\r", text)
+    newline = newline_match.group(0) if newline_match else "\n"
+    normalized = []
+    for entry in entries:
+        entry = entry.replace("\r\n", "\n").replace("\r", "\n")
+        normalized.append(entry.rstrip("\n").replace("\n", newline))
+    body = (newline * 2).join(normalized)
+
+    marker_index = matches[0]
+    prefix = "".join(lines[:marker_index + 1])
+    suffix = "".join(lines[marker_index + 1:])
+    leading = newline if prefix.endswith(("\n", "\r")) else newline * 2
+    trailing = newline * 2 if suffix and not suffix.startswith(("\n", "\r")) \
+        else newline
+    Path(main_path).write_bytes(
+        (prefix + leading + body + trailing + suffix).encode("utf-8")
+    )
+
+
 def promote(cfg) -> bool:
     """Explicit final step (PRD 7.5). Order is load-bearing:
 
     1. `hledger check` on the books AS THEY ARE (catches malformed pending —
        acceptance A8) — any failure stops everything, nothing written.
     2. Rehearse the flip in a temp copy of the repo; `hledger check` again.
-    3. Only then: append cleared entries to main.journal, truncate
-       pending.journal, append outcome events to the decision log,
-       ONE commit (journal + rules together), push.
+    3. Only then: insert cleared entries at main.journal's transaction-body
+       marker, truncate pending.journal, append outcome events to the decision
+       log, ONE commit (journal + rules together), push.
     """
     repo = cfg.repo
     ok, output = hledger.check(repo / "main.journal")
@@ -206,8 +250,7 @@ def promote(cfg) -> bool:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td) / "repo"
         shutil.copytree(repo, tmp, ignore=shutil.ignore_patterns(".git"))
-        with open(tmp / "main.journal", "a", encoding="utf-8") as f:
-            f.write("\n" + "\n".join(cleared))
+        _insert_promoted_entries(tmp / "main.journal", cleared)
         (tmp / "pending.journal").write_text(journal.PENDING_HEADER,
                                              encoding="utf-8")
         ok, output = hledger.check(tmp / "main.journal")
@@ -218,8 +261,7 @@ def promote(cfg) -> bool:
     if dry(f"promote {len(entries)} pending entries to main.journal"):
         return False
 
-    with open(repo / "main.journal", "a", encoding="utf-8") as f:
-        f.write("\n" + "\n".join(cleared))
+    _insert_promoted_entries(repo / "main.journal", cleared)
     (repo / "pending.journal").write_text(journal.PENDING_HEADER,
                                           encoding="utf-8")
     for e in entries:

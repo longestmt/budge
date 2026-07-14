@@ -9,18 +9,22 @@ from .agent_template import AGENT_MD
 from .gitutil import commit_all, ensure_repo
 from .util import dry, say
 
-MAIN_SKELETON = """\
+MAIN_TRANSACTION_MARKER = (
+    "; --- transactions (appended by budge fetch / promote) ---"
+)
+
+MAIN_SKELETON = f"""\
 ; main.journal — household books. SOURCE OF TRUTH.
 ; The operator interface is hledger itself, e.g.:
 ;   hledger -f main.journal balance --budget
 ;   hledger -f main.journal register expenses:dining
-; budge only ever APPENDS hledger-format text below the marker line.
+; budge writes hledger-format text below the marker line.
 
 include accounts.journal
 include budget.journal
 include pending.journal
 
-; --- transactions (appended by budge fetch / promote) ---
+{MAIN_TRANSACTION_MARKER}
 """
 
 ACCOUNTS_SKELETON = """\
