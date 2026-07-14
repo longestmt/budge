@@ -1,7 +1,8 @@
 """budge CLI — orchestration only, never a wrapper around hledger.
 
-Subcommands exist ONLY for workflows hledger does not have (PRD section 1):
-fetch, categorize, review/promote, plan, setup, push, notify, regenerate.
+Accounting subcommands exist ONLY for workflows hledger does not have (PRD
+section 1): fetch, categorize, review/promote, plan, setup, push, notify,
+regenerate. The update command manages Budge itself.
 There is deliberately no `budge balance` and no `budge report` — reporting,
 queries, and validation are hledger commands the operator runs directly:
 
@@ -15,6 +16,7 @@ import argparse
 import os
 import sys
 
+from . import version_string
 from . import util
 from .config import Config
 
@@ -35,12 +37,24 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--dry-run", action="store_true",
                         help="print intended actions; write nothing (A12)")
+    parser.add_argument("--version", action="version",
+                        version=version_string())
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("setup", help="interactive bootstrap (PRD 7.1)")
     p.add_argument("--services-only", action="store_true",
                    help="just (re)render and install systemd units + the "
                         "Paisa dashboard from existing config; no prompts")
+    p.add_argument("--units-only", action="store_true",
+                   help=argparse.SUPPRESS)
+
+    p = sub.add_parser("update", help="check for or install a stable Budge "
+                                      "release")
+    p.add_argument("--check", action="store_true",
+                   help="report whether an update is available; change "
+                        "nothing")
+    p.add_argument("--no-services", action="store_true",
+                   help="do not refresh installed systemd unit files")
 
     p = sub.add_parser("fetch", help="SimpleFIN pull + rules-first import "
                                      "(PRD 7.2)")
@@ -91,7 +105,12 @@ def main(argv=None) -> int:
     try:
         if args.command == "setup":
             from .setup_cmd import run_setup
-            run_setup(cfg, services_only=args.services_only)
+            run_setup(cfg, services_only=args.services_only,
+                      units_only=args.units_only)
+        elif args.command == "update":
+            from .update import run_update
+            run_update(check_only=args.check,
+                       refresh_services=not args.no_services)
         elif args.command == "fetch":
             from .fetch import run_fetch
             run_fetch(cfg, backfill_days=args.backfill,

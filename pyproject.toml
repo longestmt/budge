@@ -4,16 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "budge"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Glue around a stock hledger + SimpleFIN + Paisa stack: fetch, categorize, review, plan."
 requires-python = ">=3.9"
 # Zero runtime dependencies by design: stdlib only.
+
+[project.urls]
+Repository = "https://github.com/longestmt/budge"
 
 [project.scripts]
 budge = "budge.cli:main"
 
 [tool.setuptools]
-packages = ["budge"]
+packages = ["budge", "budge.systemd"]
+
+[tool.setuptools.dynamic]
+version = {attr = "budge.__version__"}
 
 [tool.setuptools.package-data]
 budge = ["systemd/*.in"]
+
+[tool.setuptools.data-files]
+"share/man/man1" = ["budge.1"]

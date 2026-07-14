@@ -1,4 +1,4 @@
-.TH BUDGE 1 "June 2026" "budge 1.0.0" "User Commands"
+.TH BUDGE 1 "July 2026" "budge" "User Commands"
 .SH NAME
 budge \- self-hosted household budgeting glue around hledger, SimpleFIN, and Paisa
 .SH SYNOPSIS
@@ -52,6 +52,22 @@ seeds transfer/payment rules, backfills 90 days of history with computed
 opening balances and balance assertions, installs the systemd timers, writes
 the Paisa dashboard configuration, and hands off to the budget wizard.
 Safe to re-run at any point; existing values are kept when you press Enter.
+.TP
+.B update \fR[\fB\-\-check\fR] [\fB\-\-no\-services\fR]
+Check for or install the newest stable Budge release. Releases must be tagged
+.B vX.Y.Z
+in the official code repository. The selected tag is resolved to its exact
+commit before installation through
+.BR pipx ,
+and the new command must start and report the expected version. If that check
+fails, Budge attempts to restore the previously installed tagged release.
+.B \-\-check
+only reports availability and changes nothing.
+.B \-\-no\-services
+skips re-rendering and installing the systemd unit files. An update never
+changes journals, transaction data, the private books repository, Budge
+settings, secrets, system packages, or UI dependencies. Administrator commands
+are printed when system files cannot be refreshed without elevation.
 .TP
 .B fetch \fR[\fB\-\-backfill\fR \fIDAYS\fR]
 Pull new transactions from SimpleFIN, append them to the immutable raw CSVs
@@ -156,6 +172,10 @@ configured webhook;
 sends \(lqreview ready \(em N transactions pending\(rq.
 This path only sends data out; nothing can write back through it.
 .SH OPTIONS
+.TP
+.B \-\-version
+Print the installed Budge version and, for Git-based installations, the
+recorded source commit.
 .TP
 .B \-\-dry\-run
 Print every intended action and write nothing: no files, no commits, no

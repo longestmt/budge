@@ -146,6 +146,35 @@ You'll want ready: a SimpleFIN Bridge setup token, an AI provider + key
 (Ollama cloud, OpenAI, or Anthropic), a **private** GitHub repo URL for the
 books, and (optionally) your OpenClaw notification endpoint.
 
+## Updating Budge
+
+The installer puts an isolated snapshot of Budge in `pipx`; pulling this code
+repository does not silently change the command used by timers. Check for a
+new stable release, then install it explicitly:
+
+```sh
+budge update --check
+budge update
+```
+
+Updates come only from stable `vX.Y.Z` tags in the official Budge repository.
+The tag is resolved to its exact commit before installation, the replacement
+CLI must start and report the expected version, and Budge attempts to restore
+the previous tagged release if verification fails. The updater refreshes
+generated systemd unit files but never changes journals, transaction data,
+the private books repository, Budge settings, secrets, system packages, or UI
+dependencies. Use
+`budge update --no-services` to update only the CLI. If system directories are
+not writable, Budge prints the exact administrator commands still needed.
+
+Automatic installation is deliberately not scheduled. `budge update --check`
+is read-only and suitable for a periodic availability notification.
+
+To publish an update, bump `budge.__version__`, commit it, create the matching
+annotated tag (for example `v1.1.0`), and push the tag. The updater rejects
+pre-release and non-semantic tags, and verification fails if the version in
+the tagged package does not match the tag.
+
 ## The data repo (created by setup, separate from this one)
 
 ```

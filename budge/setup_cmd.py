@@ -415,13 +415,17 @@ def _backfill(cfg) -> None:
     run_fetch(cfg, backfill_days=90, interactive=True)
 
 
-def _render_units(cfg) -> Path:
-    """Render unit templates with concrete paths into <repo>/systemd/."""
+def _render_units(cfg, destination: Path = None) -> Path:
+    """Render unit templates with concrete paths.
+
+    Setup keeps its historical <repo>/systemd destination. The updater passes
+    a machine-local destination so a code update cannot dirty the books repo.
+    """
     import budge
     # Templates ship INSIDE the package (budge/systemd/) so they exist in
     # pipx/pip installs, not just source checkouts.
     src = Path(budge.__file__).resolve().parent / "systemd"
-    dst = cfg.repo / "systemd"
+    dst = destination or cfg.repo / "systemd"
     if dry(f"render systemd unit templates into {dst}"):
         return dst
     dst.mkdir(exist_ok=True)
@@ -707,7 +711,14 @@ def run_ui(cfg, show_only: bool = False) -> None:
     _configure_ledger_file(cfg)  # keeps PATH/locale/LEDGER_FILE current too
 
 
-def run_setup(cfg, services_only: bool = False) -> None:
+def run_setup(cfg, services_only: bool = False,
+              units_only: bool = False) -> None:
+    if units_only:
+        # Internal path used after a code update. It intentionally does not
+        # install optional UI dependencies or touch the private books repo.
+        rendered = _render_units(cfg, config_dir() / "systemd")
+        _install_units(cfg, rendered)
+        return
     if services_only:
         # Re-render and (re)install systemd units + the Paisa dashboard from
         # existing configuration — no prompts, no wizard, no data changes.
