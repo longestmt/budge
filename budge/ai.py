@@ -123,25 +123,54 @@ def minimized_payload(txns: list) -> list:
 
 
 def extract_json(text: str):
-    """Pull the first JSON object out of a model reply (tolerates fencing)."""
+    """Pull the first JSON object out of a model reply.
+
+    Model providers occasionally fence JSON, include braces inside a string,
+    or emit literal newlines in a string value.  The scanner understands JSON
+    strings so braces in prose do not end the object early; ``strict=False``
+    accepts the otherwise harmless control-character mistake.  It does not
+    guess at missing fields or structurally invalid action payloads.
+    """
     m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     candidates = [m.group(1)] if m else []
-    start = text.find("{")
-    if start != -1:
+    for start, char in enumerate(text):
+        if char != "{":
+            continue
         depth = 0
+        in_string = False
+        escaped = False
         for i in range(start, len(text)):
-            if text[i] == "{":
+            char = text[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
                 depth += 1
-            elif text[i] == "}":
+            elif char == "}":
                 depth -= 1
                 if depth == 0:
                     candidates.append(text[start:i + 1])
                     break
+        if candidates:
+            break
     for c in candidates:
-        try:
-            return json.loads(c)
-        except json.JSONDecodeError:
-            continue
+        for strict in (True, False):
+            try:
+                parsed = json.loads(c, strict=strict)
+                # Some command adapters JSON-encode the model's JSON string a
+                # second time. Unwrap once, but only when it still looks JSON.
+                if isinstance(parsed, str) and parsed.lstrip().startswith("{"):
+                    parsed = json.loads(parsed, strict=strict)
+                return parsed
+            except json.JSONDecodeError:
+                continue
     return None
 
 

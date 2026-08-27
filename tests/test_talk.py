@@ -6,8 +6,8 @@ import json
 from budge import util
 from budge.gitutil import git
 from budge.plan import read_budget
-from budge.talk import (TALK_SYSTEM, TalkSession, TalkTUI, _parse_reply,
-                        run_talk)
+from budge.talk import (TALK_SYSTEM, TalkSession, TalkTUI, _clean_message,
+                        _parse_reply, run_talk)
 
 
 def _seed_budget(env):
@@ -58,6 +58,80 @@ def test_talk_rejects_unknown_and_invalid_budget_actions():
     assert reply.message == "I can make that adjustment."
     assert reply.requested == []
     assert len(reply.notices) == 3
+
+
+def test_talk_recovers_prose_from_malformed_fenced_json():
+    # Models sometimes put valid message JSON inside an object with a missing
+    # comma. Talk should show the prose, not its transport envelope, while
+    # continuing to reject all actions from that malformed object.
+    raw = r'''```json
+{
+  "message": "The largest merchant total is **CAFE LOCAL at $169.64**, but that may cover several visits.\n\nRun:\n\n```\nhledger -f main.journal register expenses:dining -M\n```"
+  "budget_changes": []
+}
+```'''
+
+    reply = _parse_reply(raw, {"expenses:dining"})
+
+    assert reply.message == (
+        "The largest merchant total is CAFE LOCAL at $169.64, but that may "
+        "cover several visits.\n\nRun:\n\n"
+        "hledger -f main.journal register expenses:dining -M")
+    assert reply.requested == []
+    assert reply.notices == []
+    assert "```json" not in reply.message
+    assert '"budget_changes"' not in reply.message
+
+
+def test_talk_accepts_literal_newlines_in_model_json_strings():
+    raw = '''```json
+{"message": "First paragraph.
+
+Second paragraph.", "budget_changes": []}
+```'''
+
+    reply = _parse_reply(raw, {"expenses:dining"})
+
+    assert reply.message == "First paragraph.\n\nSecond paragraph."
+    assert reply.notices == []
+
+
+def test_talk_formats_inline_markdown_lists_for_the_terminal():
+    message = (
+        "The three biggest gaps are: 1. **Shopping** — $643 over budget. "
+        "2. **Dining** — $307 over budget. 3. **Subscriptions** — $301 over "
+        "budget. Combined, these are $1,251 over budget. "
+        "**Practical suggestions:** - **Shopping**: Add a monthly cap. "
+        "- **Dining**: Pick a weekly target. If you'd like, I can update the "
+        "envelopes."
+    )
+
+    cleaned = _clean_message(message)
+
+    assert "\n\n1. Shopping —" in cleaned
+    assert "\n2. Dining —" in cleaned
+    assert "\n3. Subscriptions —" in cleaned
+    assert "\n\nCombined," in cleaned
+    assert "\n\nPRACTICAL SUGGESTIONS\n" in cleaned
+    assert "\n• Shopping:" in cleaned
+    assert "\n• Dining:" in cleaned
+    assert "\n\nIf you'd like" in cleaned
+    assert "**" not in cleaned
+
+
+def test_talk_warns_if_malformed_response_contains_a_write_action():
+    raw = r'''{
+      "message": "I can still explain the recommendation."
+      "budget_changes": [
+        {"category": "expenses:dining", "monthly_amount": 200}
+      ]
+    }'''
+
+    reply = _parse_reply(raw, {"expenses:dining"})
+
+    assert reply.message == "I can still explain the recommendation."
+    assert reply.requested == []
+    assert "ignored" in reply.notices[0]
 
 
 def test_talk_session_applies_checks_logs_and_commits(
@@ -184,6 +258,10 @@ def test_talk_tui_renders_and_budget_command_is_local(env):
         },
     }
     tui = TalkTUI(screen, session)
+    tui.transcript.append((
+        "Budge", "TOP OPPORTUNITIES\n\n1. Shopping — This deliberately "
+        "long recommendation wraps with a hanging indent for readability.\n"
+        "• Set a monthly cap."))
     tui._draw()
     rendered = "\n".join(str(call[2]) for call in screen.writes)
 
@@ -194,6 +272,15 @@ def test_talk_tui_renders_and_budget_command_is_local(env):
     assert "dining" in rendered
     assert "████" in rendered
     assert "MESSAGE" in rendered
+    heading = next(call for call in screen.writes
+                   if "TOP OPPORTUNITIES" in str(call[2]))
+    numbered = next(call for call in screen.writes
+                    if "1. Shopping" in str(call[2]))
+    prose = next(call for call in screen.writes
+                 if "readability" in str(call[2]))
+    assert heading[3] == tui.theme["purple"]
+    assert numbered[3] == tui.theme["cyan"]
+    assert prose[3] == tui.theme["text"]
 
     assert tui._command("/budget") is False
     assert tui.transcript[-1] == (

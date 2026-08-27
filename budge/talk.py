@@ -13,6 +13,7 @@ import curses
 import datetime as dt
 import json
 import math
+import re
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -98,7 +99,15 @@ Reply with ONLY one JSON object in this shape:
   ]
 }
 Use an empty budget_changes list when no change was clearly requested or
-accepted. Never include prose outside the JSON object.
+accepted. The message value is terminal-native plain text: do not use Markdown,
+backticks, or code fences. Use newline escapes for paragraph breaks and put a
+command on its own indented line when helpful. Start with a direct one- or
+two-sentence answer. For longer answers, put short UPPERCASE section headings
+on their own lines, put every ranked item on its own line (for example:
+1. Category — detail), use `• ` for bullets, and leave a blank line between
+sections. Keep
+recommendations concise and scannable. Never include prose outside the JSON
+object.
 """
 
 
@@ -186,18 +195,80 @@ def _current_month_context(repo: Path, budget: dict,
     }
 
 
+def _clean_message(value: object) -> str:
+    """Turn model prose into safe, readable terminal-native text."""
+    text = str(value).replace("\r\n", "\n").replace("\r", "\n")
+    # A few providers double-escape content nested in their JSON response.
+    text = text.replace("\\n", "\n").replace("\\t", "    ")
+    text = re.sub(r"(?m)^[ \t]*```[^\n]*$", "", text)
+    # Normalize common Markdown structure before stripping its decoration.
+    text = re.sub(
+        r"\*\*([^*\n]{2,50}?):\*\*",
+        lambda match: "\n\n" + match.group(1).strip().upper() + "\n",
+        text,
+    )
+    text = re.sub(
+        r"(?<!\n)[ \t]+(?=(\d+)\.\s+(?:\*\*)?[A-Z])",
+        lambda match: "\n\n" if match.group(1) == "1" else "\n",
+        text)
+    text = re.sub(
+        r"[ \t]+[-–—][ \t]+(?=(?:\*\*)?[A-Z][A-Za-z -]{1,30}"
+        r"(?:\*\*)?:)",
+        "\n• ", text)
+    text = re.sub(
+        r"[ \t]+(?=(?:Combined,|Together,|Overall,|That's where|"
+        r"That means|If you'd like))", "\n\n", text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"`([^`\n]+)`", r"\1", text)
+    text = re.sub(r"(?m)^[ \t]*[-*][ \t]+", "• ", text)
+    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text)
+    lines = [line.rstrip() for line in text.splitlines()]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    output = []
+    for line in lines:
+        if line or not output or output[-1]:
+            output.append(line)
+    return "\n".join(output).strip()
+
+
+def _recover_message(raw: str) -> str:
+    """Recover only prose from malformed JSON; never recover write actions."""
+    match = re.search(r'"message"\s*:\s*', raw)
+    if not match:
+        return ""
+    try:
+        value, _ = json.JSONDecoder(strict=False).raw_decode(raw, match.end())
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    return _clean_message(value) if isinstance(value, str) else ""
+
+
+def _contains_untrusted_action(raw: str) -> bool:
+    match = re.search(r'"budget_changes"\s*:\s*\[(.*?)\]', raw, re.DOTALL)
+    return bool(match and match.group(1).strip())
+
+
 def _parse_reply(raw: str, allowed_categories: set[str]) -> TalkReply:
     parsed = ai.extract_json(raw)
     if not isinstance(parsed, dict):
-        # A provider that ignores the JSON contract can still converse, but
-        # must never gain a write path through malformed output.
-        message = (raw.strip()
-                   or "I couldn't produce a response. Please retry.")
-        return TalkReply(message=message,
-                         notices=["No budget action was accepted from the "
-                                  "unstructured model response."])
+        # A malformed response may still contain a valid JSON string for the
+        # human-facing prose. Recover that field alone, never its write action.
+        message = _recover_message(raw)
+        looks_structured = '"message"' in raw or "```json" in raw.lower()
+        if not message and not looks_structured:
+            message = _clean_message(raw)
+        if not message:
+            message = "I couldn't decode that response. Please try again."
+        notices = []
+        if _contains_untrusted_action(raw):
+            notices.append("A budget action was ignored because the model's "
+                           "response was malformed.")
+        return TalkReply(message=message, notices=notices)
 
-    message = " ".join(str(parsed.get("message", "")).split())
+    message = _clean_message(parsed.get("message", ""))
     if not message:
         message = "What would you like to explore about your budget?"
 
@@ -624,18 +695,20 @@ class TalkTUI:
                  "Budget": "BUDGET ▣", "Notice": "NOTICE !",
                  "Error": "ERROR ×"}
         for role, body in self.transcript:
-            style = role_styles.get(role, self.theme["text"])
+            card_style = role_styles.get(role, self.theme["text"])
             label = icons.get(role, role.upper())
             top_tail = max(width - len(label) - 5, 1)
-            output.append((f"╭─ {label} " + "─" * top_tail + "╮", style))
-            wrapped = []
+            output.append((f"╭─ {label} " + "─" * top_tail + "╮",
+                           card_style))
             for paragraph in body.splitlines() or [""]:
-                wrapped.extend(textwrap.wrap(
-                    paragraph, width=content_width,
-                    replace_whitespace=False, drop_whitespace=True) or [""])
-            for line in wrapped:
-                output.append((f"│ {line:<{content_width}} │", style))
-            output.append(("╰" + "─" * max(width - 2, 1) + "╯", style))
+                wrapped = self._wrap_paragraph(paragraph, content_width)
+                for index, line in enumerate(wrapped):
+                    line_style = self._message_style(
+                        role, paragraph, line, index, card_style)
+                    output.append((f"│ {line:<{content_width}} │",
+                                   line_style))
+            output.append(("╰" + "─" * max(width - 2, 1) + "╯",
+                           card_style))
             output.append(("", self.theme["text"]))
         if self.status:
             output.extend([
@@ -647,6 +720,43 @@ class TalkTUI:
                  self.theme["green"]),
             ])
         return output
+
+    @staticmethod
+    def _wrap_paragraph(paragraph: str, width: int) -> list[str]:
+        if not paragraph:
+            return [""]
+        stripped = paragraph.strip()
+        subsequent = ""
+        number = re.match(r"(\d+\.\s+)", stripped)
+        if number:
+            subsequent = " " * len(number.group(1))
+        elif stripped.startswith("• "):
+            subsequent = "  "
+        elif paragraph.startswith(("  ", "\t")):
+            stripped = "  " + stripped
+            subsequent = "  "
+        return textwrap.wrap(
+            stripped, width=width, subsequent_indent=subsequent,
+            replace_whitespace=False, drop_whitespace=True,
+            break_long_words=False, break_on_hyphens=False) or [""]
+
+    def _message_style(self, role: str, paragraph: str, line: str,
+                       index: int, card_style: int) -> int:
+        if role != "Budge":
+            return card_style
+        stripped = line.strip()
+        original = paragraph.strip()
+        if (original and len(original) <= 60
+                and original == original.upper()
+                and re.search(r"[A-Z]", original)):
+            return self.theme["purple"]
+        if index == 0 and re.match(r"\d+\.\s+", stripped):
+            return self.theme["cyan"]
+        if index == 0 and stripped.startswith("• "):
+            return self.theme["green"]
+        if stripped.startswith(("hledger ", "budge ")):
+            return self.theme["yellow"]
+        return self.theme["text"]
 
     def _draw_budget_sidebar(self, y: int, x: int,
                              height: int, width: int) -> None:
