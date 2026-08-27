@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from . import ai, hledger, util
+from . import __version__, ai, hledger, util
 from .consult import (_amount, _budget_category, _register_rows,
                       build_snapshot)
 from .gitutil import commit_all
@@ -302,12 +302,33 @@ class TalkSession:
         self.cfg = cfg
         self.months = months
         self.history: list[dict[str, str]] = []
+        self.context: dict = {}
+
+    def refresh_context(self) -> dict:
+        self.context = build_context(self.cfg, self.months)
+        return self.context
+
+    def _sync_budget_context(self) -> None:
+        """Reflect an applied envelope change without rerunning reports."""
+        if not self.context:
+            return
+        budget = read_budget(Path(self.cfg.repo))
+        self.context["current_monthly_budget"] = budget
+        current = self.context.get("current_month_to_date", {})
+        for category in current.get("categories", []):
+            name = category.get("category")
+            if name not in budget:
+                continue
+            amount = budget[name]
+            category["monthly_budget"] = amount
+            category["remaining"] = round(
+                amount - category.get("spent_to_date", 0.0), 2)
 
     def ask(self, user_message: str) -> TalkReply:
         user_message = user_message.strip()
         if not user_message:
             return TalkReply(message="Ask me anything about your budget.")
-        context = build_context(self.cfg, self.months)
+        context = self.refresh_context()
         payload = {
             "household_context": context,
             "conversation": self.history[-20:],
@@ -324,6 +345,8 @@ class TalkSession:
             for category in sorted(unchanged):
                 reply.notices.append(
                     f"{category} was already set to that amount.")
+            if reply.applied:
+                self._sync_budget_context()
         except RuntimeError as exc:
             reply.notices.append(f"Budget change failed: {exc}")
         self.history.extend([
@@ -337,7 +360,7 @@ class TalkSession:
 
 
 class TalkTUI:
-    """Small scrolling, full-screen terminal chat interface."""
+    """Responsive, neon dashboard-style terminal chat interface."""
 
     def __init__(self, screen, session: TalkSession):
         self.screen = screen
@@ -348,14 +371,44 @@ class TalkTUI:
         ]
         self.input_text = ""
         self.status = ""
+        self.scroll_offset = 0
+        self.theme = {
+            "bg": curses.A_NORMAL,
+            "brand": curses.A_REVERSE | curses.A_BOLD,
+            "green": curses.A_BOLD,
+            "purple": curses.A_BOLD,
+            "cyan": curses.A_BOLD,
+            "yellow": curses.A_BOLD,
+            "red": curses.A_BOLD,
+            "muted": curses.A_DIM,
+            "text": curses.A_NORMAL,
+            "composer": curses.A_BOLD,
+        }
 
     def run(self) -> None:
-        curses.curs_set(1)
+        self._init_theme()
+        try:
+            curses.curs_set(1)
+        except curses.error:
+            pass
         self.screen.keypad(True)
         while True:
             self._draw()
             key = self.screen.get_wch()
             if key == curses.KEY_RESIZE:
+                continue
+            if key == curses.KEY_PPAGE:
+                self.scroll_offset += max(self.screen.getmaxyx()[0] // 2, 1)
+                continue
+            if key == curses.KEY_NPAGE:
+                self.scroll_offset = max(self.scroll_offset
+                                         - self.screen.getmaxyx()[0] // 2, 0)
+                continue
+            if key == curses.KEY_HOME:
+                self.scroll_offset = 10 ** 9
+                continue
+            if key == curses.KEY_END:
+                self.scroll_offset = 0
                 continue
             if key in ("\n", "\r", curses.KEY_ENTER):
                 message = self.input_text.strip()
@@ -372,6 +425,63 @@ class TalkTUI:
             elif isinstance(key, str) and key.isprintable():
                 self.input_text += key
 
+    def _init_theme(self) -> None:
+        """Use the logo's navy/neon palette with an eight-color fallback."""
+        try:
+            if not curses.has_colors():
+                return
+            curses.start_color()
+            try:
+                curses.use_default_colors()
+            except curses.error:
+                pass
+            if getattr(curses, "COLORS", 0) >= 256:
+                #             foreground, background
+                palette = {
+                    1: (252, 17),   # near-white on deep navy
+                    2: (48, 53),    # mint on ultraviolet
+                    3: (48, 17),    # neon green
+                    4: (213, 17),   # hot purple
+                    5: (51, 17),    # electric cyan
+                    6: (228, 17),   # warning yellow
+                    7: (203, 17),   # coral red
+                    8: (110, 17),   # muted periwinkle
+                    9: (17, 48),    # navy on mint
+                    10: (255, 53),  # composer white on purple
+                }
+            else:
+                palette = {
+                    1: (curses.COLOR_WHITE, curses.COLOR_BLACK),
+                    2: (curses.COLOR_GREEN, curses.COLOR_MAGENTA),
+                    3: (curses.COLOR_GREEN, curses.COLOR_BLACK),
+                    4: (curses.COLOR_MAGENTA, curses.COLOR_BLACK),
+                    5: (curses.COLOR_CYAN, curses.COLOR_BLACK),
+                    6: (curses.COLOR_YELLOW, curses.COLOR_BLACK),
+                    7: (curses.COLOR_RED, curses.COLOR_BLACK),
+                    8: (curses.COLOR_BLUE, curses.COLOR_BLACK),
+                    9: (curses.COLOR_BLACK, curses.COLOR_GREEN),
+                    10: (curses.COLOR_WHITE, curses.COLOR_MAGENTA),
+                }
+            for pair, (foreground, background) in palette.items():
+                curses.init_pair(pair, foreground, background)
+            self.theme = {
+                "bg": curses.color_pair(1),
+                "brand": curses.color_pair(2) | curses.A_BOLD,
+                "green": curses.color_pair(3) | curses.A_BOLD,
+                "purple": curses.color_pair(4) | curses.A_BOLD,
+                "cyan": curses.color_pair(5) | curses.A_BOLD,
+                "yellow": curses.color_pair(6) | curses.A_BOLD,
+                "red": curses.color_pair(7) | curses.A_BOLD,
+                "muted": curses.color_pair(8) | curses.A_DIM,
+                "text": curses.color_pair(1),
+                "highlight": curses.color_pair(9) | curses.A_BOLD,
+                "composer": curses.color_pair(10) | curses.A_BOLD,
+            }
+            self.screen.bkgd(" ", self.theme["bg"])
+        except curses.error:
+            # A terminal advertising broken color support should still work.
+            pass
+
     def _command(self, message: str) -> bool:
         command = message.lower()
         if command in ("/quit", "/exit", "/q"):
@@ -379,12 +489,15 @@ class TalkTUI:
         if command == "/help":
             self.transcript.append((
                 "Budge", "/budget shows current envelopes; /clear forgets "
-                "this conversation; /quit exits. Budget changes requested "
-                "in chat are checked, audited, and committed."))
+                "this conversation; /quit exits. PgUp/PgDn scroll the chat. "
+                "Budget changes requested in chat are checked, audited, "
+                "and committed."))
+            self.scroll_offset = 0
             return False
         if command == "/clear":
             self.session.clear()
             self.transcript = [("Budge", "Conversation cleared.")]
+            self.scroll_offset = 0
             return False
         if command == "/budget":
             budget = read_budget(Path(self.session.cfg.repo))
@@ -392,8 +505,10 @@ class TalkTUI:
                 f"{category}: ${amount:,.2f}/month"
                 for category, amount in sorted(budget.items()))
             self.transcript.append(("Budget", text or "No envelopes yet."))
+            self.scroll_offset = 0
             return False
         self.transcript.append(("You", message))
+        self.scroll_offset = 0
         self.status = "Budge is thinking..."
         self._draw()
         try:
@@ -414,45 +529,256 @@ class TalkTUI:
     def _draw(self) -> None:
         self.screen.erase()
         height, width = self.screen.getmaxyx()
-        width = max(width, 12)
-        title = " budge talk "
-        subtitle = " /help  /budget  /quit "
-        self._add(0, 0, title[:width], curses.A_REVERSE | curses.A_BOLD)
-        if width > len(subtitle) + len(title):
-            self._add(0, width - len(subtitle), subtitle, curses.A_REVERSE)
+        if height < 14 or width < 50:
+            self._draw_compact(height, width)
+            self.screen.refresh()
+            return
 
-        body_height = max(height - 3, 1)
-        lines = []
-        wrap_width = max(width - 4, 8)
-        for role, body in self.transcript:
-            parts = body.splitlines() or [""]
-            wrapped = []
-            for part in parts:
-                wrapped.extend(textwrap.wrap(
-                    part, width=wrap_width, replace_whitespace=False,
-                    drop_whitespace=True) or [""])
-            lines.append((role + ":", curses.A_BOLD))
-            lines.extend(("  " + line, curses.A_NORMAL) for line in wrapped)
-            lines.append(("", curses.A_NORMAL))
-        if self.status:
-            lines.append((self.status, curses.A_DIM))
-        visible = lines[-body_height:]
-        for row, (line, attrs) in enumerate(visible, start=1):
-            self._add(row, 0, line[:max(width - 1, 1)], attrs)
+        self._draw_header(width)
+        body_y = 3
+        composer_y = height - 4
+        body_height = composer_y - body_y
+        wide = width >= 100
+        sidebar_width = min(37, max(31, width // 3)) if wide else 0
+        chat_width = width - sidebar_width - (1 if wide else 0)
 
-        prompt = "> "
-        available = max(width - len(prompt) - 1, 1)
-        shown = self.input_text[-available:]
-        input_row = max(height - 1, 1)
-        self._add(input_row, 0, prompt, curses.A_BOLD)
-        self._add(input_row, len(prompt), shown)
+        self._box(body_y, 0, body_height, chat_width, " CONVERSATION ",
+                  self.theme["purple"])
+        self._draw_chat(body_y + 1, 1, body_height - 2, chat_width - 2)
+        if wide:
+            side_x = chat_width + 1
+            self._box(body_y, side_x, body_height, sidebar_width,
+                      " LIVE BUDGET ", self.theme["green"])
+            self._draw_budget_sidebar(body_y + 1, side_x + 1,
+                                      body_height - 2,
+                                      sidebar_width - 2)
+
+        self._draw_composer(composer_y, width)
         try:
-            self.screen.move(input_row, min(len(prompt) + len(shown), width - 1))
+            prompt_x = 3
+            available = max(width - prompt_x - 2, 1)
+            shown = self.input_text[-available:]
+            self.screen.move(composer_y + 1,
+                             min(prompt_x + len(shown), width - 1))
         except curses.error:
             pass
         self.screen.refresh()
 
+    def _draw_header(self, width: int) -> None:
+        self._fill(0, 0, width, self.theme["brand"])
+        title = f" ░▒▓  BUDGE // TALK  v{__version__} "
+        self._add(0, 0, title[:width], self.theme["brand"])
+        state = "◆ THINKING" if self.status else "● ONLINE"
+        if width > len(title) + len(state) + 2:
+            self._add(0, width - len(state) - 1, state,
+                      self.theme["brand"])
+
+        self._fill(1, 0, width, self.theme["bg"])
+        self._add(1, 2, "PERSONAL FINANCE COMMAND DECK",
+                  self.theme["muted"])
+        summary = self._header_summary()
+        if summary and width > len(summary) + 34:
+            self._add(1, width - len(summary) - 2, summary,
+                      self.theme["green"])
+        horizon = "━" * max(width - 1, 1)
+        self._add(2, 0, horizon, self.theme["purple"])
+        if width > 10:
+            self._add(2, width // 2 - 2, "◆◇◆", self.theme["green"])
+
+    def _header_summary(self) -> str:
+        current = self.session.context.get("current_month_to_date", {})
+        if not current:
+            return ""
+        spent = self._money(current.get("spend_to_date", 0.0))
+        month = current.get("month", "MTD")
+        return f"{month}  SPENT {spent}"
+
+    def _draw_chat(self, y: int, x: int, height: int, width: int) -> None:
+        lines = self._chat_lines(width)
+        max_offset = max(len(lines) - height, 0)
+        self.scroll_offset = min(self.scroll_offset, max_offset)
+        end = len(lines) - self.scroll_offset
+        start = max(end - height, 0)
+        visible = lines[start:end]
+        for row, (line, attrs) in enumerate(visible):
+            self._add(y + row, x, line[:width], attrs)
+        if start > 0:
+            self._add(y, x + max(width - 13, 0), " ↑ older ",
+                      self.theme["muted"])
+        if end < len(lines):
+            self._add(y + height - 1, x + max(width - 13, 0),
+                      " ↓ newer ", self.theme["muted"])
+
+    def _chat_lines(self, width: int) -> list[tuple[str, int]]:
+        output = []
+        content_width = max(width - 4, 8)
+        role_styles = {
+            "You": self.theme["purple"],
+            "Budge": self.theme["green"],
+            "Applied": self.theme["cyan"],
+            "Budget": self.theme["cyan"],
+            "Notice": self.theme["yellow"],
+            "Error": self.theme["red"],
+        }
+        icons = {"You": "YOU ◆", "Budge": "BUDGE ◈", "Applied": "APPLIED ✓",
+                 "Budget": "BUDGET ▣", "Notice": "NOTICE !",
+                 "Error": "ERROR ×"}
+        for role, body in self.transcript:
+            style = role_styles.get(role, self.theme["text"])
+            label = icons.get(role, role.upper())
+            top_tail = max(width - len(label) - 5, 1)
+            output.append((f"╭─ {label} " + "─" * top_tail + "╮", style))
+            wrapped = []
+            for paragraph in body.splitlines() or [""]:
+                wrapped.extend(textwrap.wrap(
+                    paragraph, width=content_width,
+                    replace_whitespace=False, drop_whitespace=True) or [""])
+            for line in wrapped:
+                output.append((f"│ {line:<{content_width}} │", style))
+            output.append(("╰" + "─" * max(width - 2, 1) + "╯", style))
+            output.append(("", self.theme["text"]))
+        if self.status:
+            output.extend([
+                ("╭─ BUDGE ◈ " + "─" * max(width - 12, 1) + "╮",
+                 self.theme["green"]),
+                (f"│ {'Synthesizing your budget context…':<{content_width}} │",
+                 self.theme["green"]),
+                ("╰" + "─" * max(width - 2, 1) + "╯",
+                 self.theme["green"]),
+            ])
+        return output
+
+    def _draw_budget_sidebar(self, y: int, x: int,
+                             height: int, width: int) -> None:
+        context = self.session.context
+        current = context.get("current_month_to_date", {})
+        household = context.get("household", {})
+        month = current.get("month", "NO DATA")
+        through = current.get("partial_through", "")
+        self._add(y, x + 1, f"{month}  MTD", self.theme["green"])
+        if through:
+            self._add(y + 1, x + 1, f"through {through}",
+                      self.theme["muted"])
+        self._add(y + 3, x + 1, "SPENT", self.theme["muted"])
+        self._add(y + 3, x + max(width // 2, 9),
+                  self._money(current.get("spend_to_date", 0.0)),
+                  self.theme["green"])
+        self._add(y + 4, x + 1, "INCOME", self.theme["muted"])
+        self._add(y + 4, x + max(width // 2, 9),
+                  self._money(current.get("income_to_date", 0.0)),
+                  self.theme["cyan"])
+        target = household.get("monthly_savings_target", 0.0)
+        self._add(y + 5, x + 1, "SAVE GOAL", self.theme["muted"])
+        self._add(y + 5, x + max(width // 2, 9), self._money(target),
+                  self.theme["purple"])
+        self._add(y + 7, x + 1, "ENVELOPES", self.theme["purple"])
+
+        categories = list(current.get("categories", []))
+        categories.sort(key=lambda row: self._ratio(
+            row.get("spent_to_date", 0.0), row.get("monthly_budget", 0.0)),
+                        reverse=True)
+        row_y = y + 9
+        room = max((height - 9) // 2, 0)
+        shown = categories[:room]
+        for category in shown:
+            name = str(category.get("category", "")).removeprefix("expenses:")
+            budget = category.get("monthly_budget", 0.0)
+            spent = category.get("spent_to_date", 0.0)
+            ratio = self._ratio(spent, budget)
+            style = (self.theme["red"] if ratio > 1
+                     else self.theme["yellow"] if ratio >= .8
+                     else self.theme["green"])
+            money = f"{self._money(spent)}/{self._money(budget)}"
+            available = max(width - len(money) - 3, 4)
+            self._add(row_y, x + 1, name[:available], self.theme["text"])
+            self._add(row_y, x + max(width - len(money) - 1, 1), money,
+                      style)
+            bar_width = max(width - 2, 4)
+            self._add(row_y + 1, x + 1,
+                      self._progress(ratio, bar_width), style)
+            row_y += 2
+        remaining = len(categories) - len(shown)
+        if remaining > 0 and row_y < y + height:
+            self._add(row_y, x + 1, f"+ {remaining} more  •  /budget",
+                      self.theme["muted"])
+
+    @staticmethod
+    def _ratio(spent: float, budget: float) -> float:
+        if budget <= 0:
+            return 1.0 if spent > 0 else 0.0
+        return spent / budget
+
+    @staticmethod
+    def _progress(ratio: float, width: int) -> str:
+        filled = min(max(round(ratio * width), 0), width)
+        return "█" * filled + "░" * (width - filled)
+
+    @staticmethod
+    def _money(value: float) -> str:
+        value = float(value or 0.0)
+        if abs(value) >= 10000:
+            return f"${value / 1000:,.1f}k"
+        return f"${value:,.0f}"
+
+    def _draw_composer(self, y: int, width: int) -> None:
+        status = " THINKING ◌ " if self.status else " READY ◆ "
+        self._box(y, 0, 3, width, " MESSAGE ", self.theme["purple"],
+                  right_title=status)
+        prompt = "› "
+        available = max(width - len(prompt) - 3, 1)
+        shown = self.input_text[-available:]
+        self._fill(y + 1, 1, width - 2, self.theme["composer"])
+        self._add(y + 1, 1, prompt, self.theme["composer"])
+        self._add(y + 1, 3, shown, self.theme["composer"])
+        footer = " ENTER send   PGUP/PGDN scroll   /budget   /clear   ESC quit "
+        self._fill(y + 3, 0, width, self.theme["brand"])
+        self._add(y + 3, 1, footer[:max(width - 2, 1)],
+                  self.theme["brand"])
+
+    def _draw_compact(self, height: int, width: int) -> None:
+        width = max(width, 1)
+        self._fill(0, 0, width, self.theme["brand"])
+        self._add(0, 0, " BUDGE // TALK ", self.theme["brand"])
+        body_height = max(height - 3, 1)
+        lines = self._chat_lines(max(width - 1, 8))
+        max_offset = max(len(lines) - body_height, 0)
+        self.scroll_offset = min(self.scroll_offset, max_offset)
+        end = len(lines) - self.scroll_offset
+        start = max(end - body_height, 0)
+        for row, (line, attrs) in enumerate(lines[start:end], start=1):
+            self._add(row, 0, line[:max(width - 1, 1)], attrs)
+        input_y = max(height - 2, 1)
+        self._add(input_y, 0, "› ", self.theme["green"])
+        self._add(input_y, 2, self.input_text[-max(width - 3, 1):],
+                  self.theme["composer"])
+        self._fill(max(height - 1, 1), 0, width, self.theme["brand"])
+        self._add(max(height - 1, 1), 1, "ENTER send • ESC quit",
+                  self.theme["brand"])
+
+    def _box(self, y: int, x: int, height: int, width: int, title: str,
+             attrs: int, right_title: str = "") -> None:
+        if height < 2 or width < 4:
+            return
+        top = "╭" + "─" * (width - 2) + "╮"
+        bottom = "╰" + "─" * (width - 2) + "╯"
+        self._add(y, x, top, attrs)
+        self._add(y + height - 1, x, bottom, attrs)
+        for row in range(y + 1, y + height - 1):
+            self._add(row, x, "│", attrs)
+            self._add(row, x + width - 1, "│", attrs)
+        self._add(y, x + 2, title[:max(width - 4, 1)], attrs)
+        if right_title and width > len(title) + len(right_title) + 6:
+            self._add(y, x + width - len(right_title) - 2,
+                      right_title, attrs)
+
+    def _fill(self, y: int, x: int, width: int, attrs: int) -> None:
+        self._add(y, x, " " * max(width, 0), attrs)
+
     def _add(self, y: int, x: int, text: str, attrs: int = 0) -> None:
+        height, width = self.screen.getmaxyx()
+        if y < 0 or x < 0 or y >= height or x >= width:
+            return
+        text = text[:max(width - x, 0)]
         try:
             self.screen.addstr(y, x, text, attrs)
         except curses.error:
@@ -474,4 +800,5 @@ def run_talk(cfg, months: int = 6) -> None:
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise RuntimeError("`budge talk` needs an interactive terminal")
     session = TalkSession(cfg, months=months)
+    session.refresh_context()
     curses.wrapper(lambda screen: TalkTUI(screen, session).run())

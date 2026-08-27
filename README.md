@@ -146,7 +146,9 @@ It can explain completed-month spending patterns and clearly labeled
 month-to-date totals, compare them with the current envelopes, explore
 tradeoffs, explain Budge's transaction and review workflows, teach hledger
 commands and accounting concepts, and make budget changes you clearly request
-or accept during the conversation.
+or accept during the conversation. Its responsive retrowave interface uses the
+Budge navy, neon-green, cyan, and purple palette; wide terminals add a live
+month-to-date budget sidebar with envelope progress and overspend warnings.
 
 ```sh
 budge talk                    # six completed months of context
@@ -160,7 +162,7 @@ full journal. The agent can set existing envelope amounts, but cannot create
 accounts or edit transactions. Each requested change is validated locally,
 rolled back if `hledger check` fails, appended to the household decision log,
 and committed. Use `/budget` to show the live envelopes, `/clear` to forget the
-current conversation, and `/quit` to exit.
+current conversation, PgUp/PgDn to scroll, and `/quit` to exit.
 
 ## Privacy and safety properties
 

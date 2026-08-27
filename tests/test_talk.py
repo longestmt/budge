@@ -146,14 +146,19 @@ def test_talk_tui_renders_and_budget_command_is_local(env):
     _seed_budget(env)
 
     class Screen:
+        def __init__(self, height=30, width=120):
+            self.height = height
+            self.width = width
+            self.writes = []
+
         def erase(self):
             pass
 
         def getmaxyx(self):
-            return 24, 80
+            return self.height, self.width
 
         def addstr(self, *args):
-            pass
+            self.writes.append(args)
 
         def move(self, *args):
             pass
@@ -161,10 +166,42 @@ def test_talk_tui_renders_and_budget_command_is_local(env):
         def refresh(self):
             pass
 
-    tui = TalkTUI(Screen(), TalkSession(env.cfg))
+    screen = Screen()
+    session = TalkSession(env.cfg)
+    session.context = {
+        "household": {"monthly_savings_target": 500.0},
+        "current_month_to_date": {
+            "month": "2026-08",
+            "partial_through": "2026-08-27",
+            "spend_to_date": 425.0,
+            "income_to_date": 3000.0,
+            "categories": [
+                {"category": "expenses:dining", "monthly_budget": 400.0,
+                 "spent_to_date": 425.0},
+                {"category": "expenses:groceries", "monthly_budget": 650.0,
+                 "spent_to_date": 300.0},
+            ],
+        },
+    }
+    tui = TalkTUI(screen, session)
     tui._draw()
+    rendered = "\n".join(str(call[2]) for call in screen.writes)
+
+    assert "BUDGE // TALK" in rendered
+    assert "LIVE BUDGET" in rendered
+    assert "PERSONAL FINANCE COMMAND DECK" in rendered
+    assert "ENVELOPES" in rendered
+    assert "dining" in rendered
+    assert "████" in rendered
+    assert "MESSAGE" in rendered
 
     assert tui._command("/budget") is False
     assert tui.transcript[-1] == (
         "Budget", "expenses:dining: $400.00/month\n"
         "expenses:groceries: $650.00/month")
+
+    narrow = Screen(height=24, width=80)
+    TalkTUI(narrow, session)._draw()
+    narrow_rendered = "\n".join(str(call[2]) for call in narrow.writes)
+    assert "CONVERSATION" in narrow_rendered
+    assert "LIVE BUDGET" not in narrow_rendered
