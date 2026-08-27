@@ -136,6 +136,48 @@ months (default 3) and proposes a budget diff for approval.
 Nothing is written without explicit confirmation, and the wizard cites only
 your own numbers \(em no external benchmarks.
 .TP
+.B consult \fR[\fB\-\-months\fR \fIN\fR]
+Provide a cashflow-aware consultation for an existing budget using up to
+.I N
+completed calendar months (default 6). The current partial month is excluded.
+Shows observed income and spending, the savings target and resulting spending
+ceiling, and every current envelope beside its adjusted completed-month
+average. Then proposes a new amount for every envelope and practical
+category- or merchant-grounded reductions, with potential savings calculated
+per month and per year.
+.PP
+The AI receives aggregate category and top-merchant totals, never full
+transactions, account numbers, or balances. Budge validates the proposed
+categories and amounts and computes the savings arithmetic itself. The final
+.I budget.journal
+diff is written only after explicit confirmation and a passing
+.BR "hledger check" .
+.TP
+.B talk \fR[\fB\-\-months\fR \fIN\fR]
+Open a full-screen terminal conversation about the household budget and
+spending, as well as an expert guide to Budge's workflows and hledger's role,
+files, reports, queries, and accounting concepts. The agent receives current
+envelopes, household-stated goals,
+clearly labeled current month-to-date aggregates, and aggregate category and
+top-merchant totals from up to
+.I N
+completed months (default 6). It never receives account numbers, balances, or
+the full journal.
+.PP
+The agent is authorized to set existing monthly envelope amounts when the
+operator clearly requests or accepts a change in the conversation. It cannot
+create accounts or edit transactions. Budge validates each request locally,
+rolls the file back if
+.B hledger check
+fails, appends the change to the household decision log, and commits it.
+Within the interface,
+.B /budget
+shows current envelopes,
+.B /clear
+forgets the conversation, and
+.B /quit
+exits.
+.TP
 .B regenerate
 Rebuild
 .I pending.journal
@@ -257,6 +299,18 @@ Re-assess the budget over the last six months:
 .PP
 .nf
     budge plan \-\-reassess \-\-months 6
+.fi
+.PP
+Get a budget consultation over the last twelve completed months:
+.PP
+.nf
+    budge consult \-\-months 12
+.fi
+.PP
+Discuss the budget interactively and make requested envelope changes:
+.PP
+.nf
+    budge talk
 .fi
 .SH SEE ALSO
 .BR hledger (1),

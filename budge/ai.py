@@ -7,10 +7,11 @@ Providers:
   command            run a local executable: prompt on stdin, reply on stdout.
                      Used by the test suite; also handy for offline scripting.
 
-DATA MINIMIZATION CONTRACT (PRD section 6, enforced here in code regardless of
-provider): the request payload contains ONLY payee/description, amount, date,
-and source account name per transaction — plus the category list and examples
-from agent.md. Account numbers, balances, and full history are never sent.
+DATA MINIMIZATION CONTRACT (PRD section 6): categorization payloads are
+stripped to payee/description, amount, date, and source account name by
+``minimized_payload``. Planning, consultation, and Budge Talk use aggregate
+category and merchant totals plus household-stated goals. Account numbers,
+bank balances, and the full journal are never sent.
 """
 
 from __future__ import annotations

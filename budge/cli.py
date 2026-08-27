@@ -2,7 +2,7 @@
 
 Accounting subcommands exist ONLY for workflows hledger does not have (PRD
 section 1): fetch, categorize, review/promote, plan, setup, push, notify,
-regenerate. The update command manages Budge itself.
+regenerate, consult, and talk. The update command manages Budge itself.
 There is deliberately no `budge balance` and no `budge report` — reporting,
 queries, and validation are hledger commands the operator runs directly:
 
@@ -78,6 +78,16 @@ def main(argv=None) -> int:
     p.add_argument("--from-setup", action="store_true",
                    help=argparse.SUPPRESS)
 
+    p = sub.add_parser("consult", help="cashflow-aware budget proposal with "
+                                        "spending reduction suggestions")
+    p.add_argument("--months", type=int, default=6,
+                   help="completed months to analyze (default: 6)")
+
+    p = sub.add_parser("talk", help="discuss your budget and spending with "
+                                     "Budge in a terminal UI")
+    p.add_argument("--months", type=int, default=6,
+                   help="completed months to include as context (default: 6)")
+
     sub.add_parser("regenerate", help="rebuild pending.journal from raw "
                                       "CSVs + rules + decision log")
 
@@ -130,6 +140,12 @@ def main(argv=None) -> int:
                     else "reassess" if args.reassess else None)
             run_plan(cfg, mode=mode, months=args.months,
                      from_setup=args.from_setup)
+        elif args.command == "consult":
+            from .consult import run_consult
+            run_consult(cfg, months=args.months)
+        elif args.command == "talk":
+            from .talk import run_talk
+            run_talk(cfg, months=args.months)
         elif args.command == "regenerate":
             from .categorize import regenerate
             result = regenerate(cfg)

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "budge"
 dynamic = ["version"]
-description = "Glue around a stock hledger + SimpleFIN + Paisa stack: fetch, categorize, review, plan."
+description = "Glue around hledger, SimpleFIN, and Paisa: fetch, categorize, review, plan, consult, talk."
 requires-python = ">=3.9"
 # Zero runtime dependencies by design: stdlib only.
 

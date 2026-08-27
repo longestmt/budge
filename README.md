@@ -50,9 +50,10 @@ budge is the glue around four boring, proven, completely-stock tools:
 
 budge itself is a small Python CLI (no dependencies) that orchestrates the
 workflows those tools don't have: fetching, AI categorization, weekly review,
-and budget planning. It deliberately does **not** wrap their features — when
-you want a report, you ask hledger directly, and the skills you learn are
-hledger skills, not budge skills.
+budget planning, cashflow-aware consultation, and an interactive budget
+conversation. It deliberately does **not** wrap their features — when you want
+a report, you ask hledger directly, and the skills you learn are hledger
+skills, not budge skills.
 
 ## How a transaction flows through the system
 
@@ -90,7 +91,8 @@ review.**
 |---|---|---|
 | every morning | new transactions appear in the books, zero manual steps, zero duplicates; a balance assertion cross-checks the books against the bank's reported balance | automatic |
 | weekly | you get a nudge ("review ready — 14 pending"), run `budge review`, and confirm/correct vendor by vendor — under ten minutes | you |
-| quarterly-ish | `budge plan` compares envelopes to reality ("dining 32% over for 3 months") and proposes adjustments you approve or decline | you |
+| quarterly-ish | `budge consult` reviews completed-month cashflow and spending, proposes new envelopes, and shows practical cuts with monthly and annual savings | you |
+| anytime | `budge talk` opens a terminal conversation about the household budget and can make requested envelope changes | you + AI |
 | anytime | the Paisa dashboard shows what's left in each envelope | anyone in the house |
 
 Reporting is plain hledger whenever you want it:
@@ -112,6 +114,54 @@ savings = ceiling; the math conflicts are surfaced, never auto-resolved), and
 like yours typically spend..." It's a bookkeeping assistant, not a financial
 advisor.
 
+## Budget consultation
+
+`budge consult` is the deeper periodic checkup after a budget exists. It uses
+the available completed calendar months (six by default), so a half-finished
+current month cannot distort the result. The consultation shows:
+
+- observed monthly income, spending, the household savings target, and the
+  resulting spending ceiling;
+- every current envelope beside its adjusted completed-month average;
+- a proposed amount for every envelope, including increases where the current
+  number is no longer realistic; and
+- category- and merchant-grounded ideas for reducing spend, with each
+  potential reduction shown per month and per year.
+
+The configured AI receives only those aggregates and the top merchant totals
+inside each category—not full transactions, account numbers, or balances.
+Budge validates the returned categories and amounts and calculates all savings
+itself. The proposal is displayed as a `budget.journal` diff and is written
+only after explicit approval and a passing `hledger check`.
+
+```sh
+budge consult                 # up to six completed months
+budge consult --months 12     # longer view for seasonal spending
+```
+
+## Budge Talk
+
+`budge talk` opens a full-screen terminal conversation with the configured AI.
+It can explain completed-month spending patterns and clearly labeled
+month-to-date totals, compare them with the current envelopes, explore
+tradeoffs, explain Budge's transaction and review workflows, teach hledger
+commands and accounting concepts, and make budget changes you clearly request
+or accept during the conversation.
+
+```sh
+budge talk                    # six completed months of context
+budge talk --months 12        # use a longer aggregate history
+```
+
+Talk sends the same minimized data used by consultation, plus current
+month-to-date aggregates: category and top-merchant totals, current envelopes,
+and household-stated goals. It never sends account numbers, balances, or the
+full journal. The agent can set existing envelope amounts, but cannot create
+accounts or edit transactions. Each requested change is validated locally,
+rolled back if `hledger check` fails, appended to the household decision log,
+and committed. Use `/budget` to show the live envelopes, `/clear` to forget the
+current conversation, and `/quit` to exit.
+
 ## Privacy and safety properties
 
 - **Two separate repos.** This repo is *code only* and contains no financial
@@ -119,16 +169,19 @@ advisor.
   **private**. (See the layout below.)
 - **Secrets never enter either repo**: bank access URL and AI key live in
   `~/.config/budge/secrets.env`, chmod 600.
-- **The AI sees the minimum**: payee, amount, date, and which account — never
-  account numbers, balances, or your full history. Enforced in code
-  regardless of provider; switching to a fully local model is a one-line
-  config change.
+- **The AI sees the minimum for each job**: categorization gets payee, amount,
+  date, and source account; planning, consultation, and Talk get
+  monthly/category aggregates, stated goals, and top merchant totals. It never
+  receives account numbers, balances, or the full journal. Switching to a fully
+  local model is a one-line config change.
 - **Append-only audit trail**: every AI suggestion, rejection, and review
   outcome is logged in `ai/ai-decisions.log`.
 - **Hard gate on the books**: nothing is promoted, committed, or pushed
   unless `hledger check` passes.
-- **The notifier (OpenClaw) is outbound-only** — there is no code path by
-  which it, or the AI, can write to your journal, rules, or git.
+- **The notifier (OpenClaw) is outbound-only.** Budge Talk gives agent-requested
+  actions one narrow write path: it can set existing budget envelopes through
+  local validation, the hledger check gate, an audit entry, and a git commit.
+  It cannot edit transactions, categorization rules, or account declarations.
 
 ## Getting started (Debian 13)
 
@@ -234,7 +287,7 @@ python3 -m pytest tests/        # needs hledger >= 1.25 on PATH
                                 # (or BUDGE_TEST_HLEDGER=/path/to/hledger)
 ```
 
-32 tests cover the PRD acceptance criteria that are exercisable off-box
-(A2–A9, A11–A15), using a fake SimpleFIN server that speaks the real protocol
-and a deterministic fake AI provider. A1/A10 (fresh-LXC setup and systemd
-failure alerts) need a real Debian box.
+The test suite covers the PRD acceptance criteria that are exercisable off-box
+(A2–A9, A11–A15), plus the consultation workflow, using a fake SimpleFIN
+server that speaks the real protocol and a deterministic fake AI provider.
+A1/A10 (fresh-LXC setup and systemd failure alerts) need a real Debian box.

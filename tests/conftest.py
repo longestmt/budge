@@ -120,7 +120,7 @@ the user payload is the final line (compact JSON). Behavior comes from the
 JSON file at $BUDGE_FAKE_AI_MAP:
   {"malformed": true}                      -> reply with non-JSON garbage
   {"map": {PAYEE: {...decision...}}, "default": {...} | null,
-   "plan": {...wizard reply...}}
+   "plan": {...wizard reply...}, "consult": {...}, "talk": {...}}
 """
 import json, os, sys
 
@@ -130,6 +130,12 @@ if spec.get("malformed"):
     print("hmm, these look like groceries to me, mostly! no json today.")
     sys.exit(0)
 payload = json.loads(text.strip().splitlines()[-1])
+if "household_context" in payload:
+    print(json.dumps(spec.get("talk", {})))
+    sys.exit(0)
+if "consultation" in payload:
+    print(json.dumps(spec.get("consult", {})))
+    sys.exit(0)
 if "merchants" in payload:
     print(json.dumps(spec.get("plan", {})))
     sys.exit(0)
