@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from importlib import metadata
 
-__version__ = "1.2.2"
+__version__ = "1.2.3"
 
 
 def installed_commit() -> str:

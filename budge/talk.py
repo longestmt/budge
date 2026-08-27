@@ -443,6 +443,7 @@ class TalkTUI:
         self.input_text = ""
         self.status = ""
         self.scroll_offset = 0
+        self._scroll_to_transcript: Optional[int] = None
         self.theme = {
             "bg": curses.A_NORMAL,
             "brand": curses.A_REVERSE | curses.A_BOLD,
@@ -469,16 +470,20 @@ class TalkTUI:
             if key == curses.KEY_RESIZE:
                 continue
             if key == curses.KEY_PPAGE:
+                self._scroll_to_transcript = None
                 self.scroll_offset += max(self.screen.getmaxyx()[0] // 2, 1)
                 continue
             if key == curses.KEY_NPAGE:
+                self._scroll_to_transcript = None
                 self.scroll_offset = max(self.scroll_offset
                                          - self.screen.getmaxyx()[0] // 2, 0)
                 continue
             if key == curses.KEY_HOME:
+                self._scroll_to_transcript = None
                 self.scroll_offset = 10 ** 9
                 continue
             if key == curses.KEY_END:
+                self._scroll_to_transcript = None
                 self.scroll_offset = 0
                 continue
             if key in ("\n", "\r", curses.KEY_ENTER):
@@ -579,12 +584,15 @@ class TalkTUI:
             self.scroll_offset = 0
             return False
         self.transcript.append(("You", message))
+        self._scroll_to_transcript = None
         self.scroll_offset = 0
         self.status = "Budge is thinking..."
         self._draw()
         try:
             reply = self.session.ask(message)
+            response_index = len(self.transcript)
             self.transcript.append(("Budge", reply.message))
+            self._scroll_to_transcript = response_index
             for change in reply.applied:
                 self.transcript.append((
                     "Applied", f"{change.category} -> "
@@ -592,6 +600,7 @@ class TalkTUI:
             for notice_text in reply.notices:
                 self.transcript.append(("Notice", notice_text))
         except ai.AIError as exc:
+            self._scroll_to_transcript = len(self.transcript)
             self.transcript.append(("Error", str(exc)))
         finally:
             self.status = ""
@@ -666,6 +675,7 @@ class TalkTUI:
 
     def _draw_chat(self, y: int, x: int, height: int, width: int) -> None:
         lines = self._chat_lines(width)
+        self._focus_new_response(lines, height, width)
         max_offset = max(len(lines) - height, 0)
         self.scroll_offset = min(self.scroll_offset, max_offset)
         end = len(lines) - self.scroll_offset
@@ -679,6 +689,24 @@ class TalkTUI:
         if end < len(lines):
             self._add(y + height - 1, x + max(width - 13, 0),
                       " ↓ newer ", self.theme["muted"])
+
+    def _focus_new_response(self, lines: list[tuple[str, int]], height: int,
+                            width: int) -> None:
+        """Open a newly received response at the beginning of its card."""
+        if self._scroll_to_transcript is None:
+            return
+        index = min(self._scroll_to_transcript, len(self.transcript) - 1)
+        content_width = max(width - 4, 8)
+        start = 0
+        for _, body in self.transcript[:index]:
+            wrapped = sum(
+                len(self._wrap_paragraph(paragraph, content_width))
+                for paragraph in body.splitlines() or [""])
+            start += wrapped + 3  # card top, card bottom, trailing blank
+        remaining = len(lines) - start
+        self.scroll_offset = (max(len(lines) - start - height, 0)
+                              if remaining > height else 0)
+        self._scroll_to_transcript = None
 
     def _chat_lines(self, width: int) -> list[tuple[str, int]]:
         output = []
@@ -850,7 +878,9 @@ class TalkTUI:
         self._fill(0, 0, width, self.theme["brand"])
         self._add(0, 0, " BUDGE // TALK ", self.theme["brand"])
         body_height = max(height - 3, 1)
-        lines = self._chat_lines(max(width - 1, 8))
+        chat_width = max(width - 1, 8)
+        lines = self._chat_lines(chat_width)
+        self._focus_new_response(lines, body_height, chat_width)
         max_offset = max(len(lines) - body_height, 0)
         self.scroll_offset = min(self.scroll_offset, max_offset)
         end = len(lines) - self.scroll_offset

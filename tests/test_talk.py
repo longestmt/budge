@@ -292,3 +292,49 @@ def test_talk_tui_renders_and_budget_command_is_local(env):
     narrow_rendered = "\n".join(str(call[2]) for call in narrow.writes)
     assert "CONVERSATION" in narrow_rendered
     assert "LIVE BUDGET" not in narrow_rendered
+
+
+def test_talk_tui_opens_long_new_response_at_its_first_line(env):
+    _seed_budget(env)
+
+    class Screen:
+        def __init__(self):
+            self.writes = []
+
+        def erase(self):
+            self.writes = []
+
+        def getmaxyx(self):
+            return 22, 100
+
+        def addstr(self, *args):
+            self.writes.append(args)
+
+        def move(self, *args):
+            pass
+
+        def refresh(self):
+            pass
+
+    screen = Screen()
+    tui = TalkTUI(screen, TalkSession(env.cfg))
+    tui.transcript.extend([
+        ("You", "Review my budget."),
+        ("Budge", "OPENING LINE\n" + "\n".join(
+            f"Detail line {number}" for number in range(1, 30))
+         + "\nFINAL LINE"),
+    ])
+    tui._scroll_to_transcript = len(tui.transcript) - 1
+
+    tui._draw()
+    rendered = "\n".join(str(call[2]) for call in screen.writes)
+
+    assert "OPENING LINE" in rendered
+    assert "Detail line 1" in rendered
+    assert "FINAL LINE" not in rendered
+    assert tui.scroll_offset > 0
+
+    # The focus becomes an ordinary scroll offset and survives redraws.
+    tui._draw()
+    rendered_again = "\n".join(str(call[2]) for call in screen.writes)
+    assert "OPENING LINE" in rendered_again
